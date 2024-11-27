@@ -2,8 +2,10 @@ import argparse
 import functools
 import logging
 import sys
+import typing
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from sanipro import common
 from sanipro.compatible import Self
@@ -19,7 +21,13 @@ from sanipro.filters import (
     unique,
 )
 from sanipro.filters.abc import ReordererStrategy
-from sanipro.utils import CommandModuleMap, KeyVal, ModuleMatcher
+from sanipro.filters.utils import (
+    sort_by_length,
+    sort_by_ord_sum,
+    sort_by_weight,
+    sort_lexicographically,
+)
+
 from saniprocli import cli_hooks
 from saniprocli.cli_runner import Runner
 from saniprocli.commands import CommandsBase
@@ -30,10 +38,48 @@ logger_root = logging.getLogger()
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class CmdModuleTuple:
+    key: str
+    callable_name: typing.Any
+
+
+class ModuleMapper:
+    """The name definition for the subcommands."""
+
+    @classmethod
+    def list_commands(cls) -> list:
+        """Get a list of available subcommand representations"""
+        return [val for key, val in cls.__dict__.items() if key.isupper()]
+
+
+class ModuleMatcher:
+    def __init__(self, mapping: type[ModuleMapper]):
+        if not issubclass(mapping, ModuleMapper):
+            raise TypeError("invalid command module map was given!")
+        self.commands = {
+            val.key: val.val for key, val in mapping.__dict__.items() if key.isupper()
+        }
+
+    def match(self, method: str) -> typing.Any:
+        # Todo: typing.Any を利用しないいい方法はないか？
+        result = self.commands.get(method)
+        if result is None:
+            raise KeyError
+        return result
+
+
 class ExcludeCommand(exclude.ExcludeCommand):
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction):
         pass
+
+
+class MSTModuleMapper(ModuleMapper):
+    NAIVE = CmdModuleTuple("naive", fuzzysort.NaiveReorderer)
+    GREEDY = CmdModuleTuple("greedy", fuzzysort.GreedyReorderer)
+    KRUSKAL = CmdModuleTuple("kruskal", fuzzysort.KruskalMSTReorderer)
+    PRIM = CmdModuleTuple("prim", fuzzysort.PrimMSTReorderer)
 
 
 class SimilarCommand(fuzzysort.SimilarCommand):
@@ -63,7 +109,7 @@ class SimilarCommand(fuzzysort.SimilarCommand):
         )
 
         subcommand.add_parser(
-            MSTAvailable.NAIVE.key,
+            MSTModuleMapper.NAIVE.key,
             formatter_class=SaniproHelpFormatter,
             help=(
                 "Calculates all permutations of a sequence of tokens. "
@@ -72,7 +118,7 @@ class SimilarCommand(fuzzysort.SimilarCommand):
         )
 
         subcommand.add_parser(
-            MSTAvailable.GREEDY.key,
+            MSTModuleMapper.GREEDY.key,
             formatter_class=SaniproHelpFormatter,
             help=(
                 "Uses a greedy approach that always chooses the next element "
@@ -100,18 +146,37 @@ class SimilarCommand(fuzzysort.SimilarCommand):
             "-p", "--prim", action="store_true", help=("Uses Prim's algorithm.")
         )
 
-    @staticmethod
-    def get_reorderer(cmd: "DemoCommands") -> ReordererStrategy:
+    @classmethod
+    def apply_from(cls, method: str | None = None) -> type[fuzzysort.MSTReorderer]:
+        """
+        method を具体的なクラスの名前にマッチングさせる。
+
+        Argument:
+            method: コマンドラインで指定された方法.
+        """
+        # set default
+        default = MSTModuleMapper.GREEDY.key
+        if method is None:
+            method = default
+
+        mapper = ModuleMatcher(MSTModuleMapper)
+        try:
+            return mapper.match(method)
+        except KeyError:
+            raise ValueError("method name is not found.")
+
+    @classmethod
+    def get_reorderer(cls, cmd: "DemoCommands") -> ReordererStrategy:
         """Instanciate one reorder function from the parsed result."""
 
         def get_class(cmd: "DemoCommands"):
             query = cmd.similar_method
             if query != "mst":
-                return fuzzysort_apply_from(method=query)
+                return cls.apply_from(method=query)
 
             adapters = [
-                [cmd.kruskal, MSTAvailable.KRUSKAL],
-                [cmd.prim, MSTAvailable.PRIM],
+                [cmd.kruskal, MSTModuleMapper.KRUSKAL],
+                [cmd.prim, MSTModuleMapper.PRIM],
             ]
             for _flag, _cls in adapters:
                 if _flag:
@@ -133,32 +198,6 @@ class SimilarCommand(fuzzysort.SimilarCommand):
     def create_from_cmd(cls, cmd: "DemoCommands", *, reverse=False) -> Self:
         """Alternative method."""
         return cls(reorderer=cls.get_reorderer(cmd), reverse=reverse)
-
-
-class MSTAvailable(CommandModuleMap):
-    NAIVE = KeyVal("naive", fuzzysort.NaiveReorderer)
-    GREEDY = KeyVal("greedy", fuzzysort.GreedyReorderer)
-    KRUSKAL = KeyVal("kruskal", fuzzysort.KruskalMSTReorderer)
-    PRIM = KeyVal("prim", fuzzysort.PrimMSTReorderer)
-
-
-def fuzzysort_apply_from(*, method: str | None = None) -> type[fuzzysort.MSTReorderer]:
-    """
-    method を具体的なクラスの名前にマッチングさせる。
-
-    Argument:
-        method: コマンドラインで指定された方法.
-    """
-    # set default
-    default = MSTAvailable.GREEDY.key
-    if method is None:
-        method = default
-
-    mapper = ModuleMatcher(MSTAvailable)
-    try:
-        return mapper.match(method)
-    except KeyError:
-        raise ValueError("method name is not found.")
 
 
 class MaskCommand(mask.MaskCommand):
@@ -247,24 +286,11 @@ class SortCommand(sort.SortCommand):
         )
 
 
-def sort_all_apply_from(*, method: str | None = None) -> functools.partial:
-    """
-    method を具体的なクラスの名前にマッチングさせる。
-
-    Argument:
-        method: コマンドラインで指定された方法.
-    """
-    # set default
-    default = sort_all.Available.LEXICOGRAPHICAL.key
-    if method is None:
-        method = default
-
-    mapper = ModuleMatcher(sort_all.Available)
-    try:
-        partial = functools.partial(sorted, key=mapper.match(method))
-        return partial
-    except KeyError:
-        raise ValueError("method name is not found.")
+class SortAllModuleMapper(ModuleMapper):
+    LEXICOGRAPHICAL = CmdModuleTuple("lexicographical", sort_lexicographically)
+    LENGTH = CmdModuleTuple("length", sort_by_length)
+    STRENGTH = CmdModuleTuple("weight", sort_by_weight)
+    ORD_SUM = CmdModuleTuple("ord-sum", sort_by_ord_sum)
 
 
 class SortAllCommand(sort_all.SortAllCommand):
@@ -289,12 +315,12 @@ class SortAllCommand(sort_all.SortAllCommand):
         )
 
         subcommand.add_parser(
-            sort_all.Available.LEXICOGRAPHICAL.key,
+            SortAllModuleMapper.LEXICOGRAPHICAL.key,
             help="Sort the prompt with lexicographical order. Familiar sort method.",
         )
 
         subcommand.add_parser(
-            sort_all.Available.LENGTH.key,
+            SortAllModuleMapper.LENGTH.key,
             help=(
                 "Reorder the token length."
                 "This behaves slightly similar as 'ord-sum' method."
@@ -302,11 +328,12 @@ class SortAllCommand(sort_all.SortAllCommand):
         )
 
         subcommand.add_parser(
-            sort_all.Available.STRENGTH.key, help="Reorder the tokens by their weights."
+            SortAllModuleMapper.STRENGTH.key,
+            help="Reorder the tokens by their weights.",
         )
 
         subcommand.add_parser(
-            sort_all.Available.ORD_SUM.key,
+            SortAllModuleMapper.ORD_SUM.key,
             help=(
                 "Reorder the tokens by its sum of character codes."
                 "This behaves slightly similar as 'length' method."
@@ -314,9 +341,30 @@ class SortAllCommand(sort_all.SortAllCommand):
         )
 
     @classmethod
+    def apply_from(cls, *, method: str | None = None) -> functools.partial:
+        """
+        method を具体的なクラスの名前にマッチングさせる。
+
+        Argument:
+            method: コマンドラインで指定された方法.
+        """
+        # set default
+        default = SortAllModuleMapper.LEXICOGRAPHICAL.key
+        if method is None:
+            method = default
+
+        mapper = ModuleMatcher(SortAllModuleMapper)
+        try:
+            partial = functools.partial(sorted, key=mapper.match(method))
+            return partial
+        except KeyError:
+            raise ValueError("method name is not found.")
+
+    @classmethod
     def create_from_cmd(cls, cmd: "DemoCommands", *, reverse=False) -> Self:
         """Alternative method."""
-        partial = sort_all_apply_from(method=cmd.sort_all_method)
+
+        partial = cls.apply_from(method=cmd.sort_all_method)
         return cls(partial, reverse=reverse)
 
 

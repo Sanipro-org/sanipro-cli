@@ -11,12 +11,14 @@ from sanipro.common import MutablePrompt, PromptPipeline
 from sanipro.filters.utils import collect_same_tokens
 from sanipro.parser import TokenInteractive, TokenNonInteractive
 from sanipro.utils import HasPrettyRepr
+
 from saniprocli import cli_hooks
 
 from .commands import CommandsBase
 from .utils import get_debug_fp
 
 logger_root = logging.getLogger()
+
 logger = logging.getLogger(__name__)
 
 
