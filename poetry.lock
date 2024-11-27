@@ -20,6 +20,25 @@ extra = ["lxml (>=4.6)", "pydot (>=3.0.1)", "pygraphviz (>=1.14)", "sympy (>=1.1
 test = ["pytest (>=7.2)", "pytest-cov (>=4.0)"]
 
 [[package]]
+name = "sanipro"
+version = "0.1.0"
+description = "Sanitizes prompts."
+optional = false
+python-versions = "^3.10"
+files = []
+develop = false
+
+[package.dependencies]
+networkx = "^3.4.2"
+typing-extensions = "^4.12.2"
+
+[package.source]
+type = "git"
+url = "https://github.com/froggie3/Sanipro.git"
+reference = "HEAD"
+resolved_reference = "eeb508d64226709556db7955904da5f014834387"
+
+[[package]]
 name = "typing-extensions"
 version = "4.12.2"
 description = "Backported and Experimental Type Hints for Python 3.8+"
@@ -32,5 +51,5 @@ files = [
 
 [metadata]
 lock-version = "2.0"
-python-versions = "^3.10"
-content-hash = "485cf0d496228395c1e1f04326c21490fe064c5550d6df12c64b3b0d4bcd9679"
+python-versions = "^3.12"
+content-hash = "4e69e4eb1fa469d5d30c3983d8b5ec4723a1e13662c5ee9c96302c28fd43bfcb"
