@@ -34,7 +34,7 @@ typing-extensions = "^4.12.2"
 
 [package.source]
 type = "git"
-url = "https://github.com/Sanipro-org/Sanipro"
+url = "https://github.com/froggie3/sanipro.git"
 reference = "HEAD"
 resolved_reference = "b0de16464a542183075b83f93b6dd791569a203c"
 
@@ -52,4 +52,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.12"
-content-hash = "2681fe3f214ae573c447e81bd9d599b853a0927ee00933fcd85967e45107127a"
+content-hash = "d0ed7b59e382e4ff7283ee8b058da77ebdc6d8ac93e2a6c3f4d9077c8483f792"
