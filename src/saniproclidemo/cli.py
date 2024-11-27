@@ -109,7 +109,10 @@ class SimilarCommand(fuzzysort.SimilarCommand):
             if query != "mst":
                 return fuzzysort_apply_from(method=query)
 
-            adapters = [[cmd.kruskal, MSTAvailable.KRUSKAL], [cmd.prim, MSTAvailable.PRIM]]
+            adapters = [
+                [cmd.kruskal, MSTAvailable.KRUSKAL],
+                [cmd.prim, MSTAvailable.PRIM],
+            ]
             for _flag, _cls in adapters:
                 if _flag:
                     # when --kruskal or --prim flag is specified
@@ -488,3 +491,7 @@ def app():
         logger.exception(f"error: {e}")
     finally:
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    app()

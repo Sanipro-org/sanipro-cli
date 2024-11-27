@@ -34,9 +34,9 @@ typing-extensions = "^4.12.2"
 
 [package.source]
 type = "git"
-url = "https://github.com/froggie3/Sanipro.git"
+url = "https://github.com/Sanipro-org/Sanipro"
 reference = "HEAD"
-resolved_reference = "eeb508d64226709556db7955904da5f014834387"
+resolved_reference = "b0de16464a542183075b83f93b6dd791569a203c"
 
 [[package]]
 name = "typing-extensions"
@@ -52,4 +52,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.12"
-content-hash = "4e69e4eb1fa469d5d30c3983d8b5ec4723a1e13662c5ee9c96302c28fd43bfcb"
+content-hash = "2681fe3f214ae573c447e81bd9d599b853a0927ee00933fcd85967e45107127a"
