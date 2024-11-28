@@ -3,9 +3,9 @@ import functools
 import logging
 import sys
 import typing
+import pprint
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from dataclasses import dataclass
 
 from sanipro import common
 from sanipro.compatible import Self
@@ -32,14 +32,16 @@ from saniprocli import cli_hooks
 from saniprocli.cli_runner import Runner
 from saniprocli.commands import CommandsBase
 from saniprocli.help_formatter import SaniproHelpFormatter
+from saniprocli.utils import get_debug_fp
+
+from typing import NamedTuple
 
 logger_root = logging.getLogger()
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class CmdModuleTuple:
+class CmdModuleTuple(NamedTuple):
     key: str
     callable_name: typing.Any
 
@@ -48,22 +50,24 @@ class ModuleMapper:
     """The name definition for the subcommands."""
 
     @classmethod
-    def list_commands(cls) -> list:
+    def list_commands(cls) -> dict:
         """Get a list of available subcommand representations"""
-        return [val for key, val in cls.__dict__.items() if key.isupper()]
+        return dict(cls.__dict__[var] for var in vars(cls) if var.isupper())
 
 
 class ModuleMatcher:
-    def __init__(self, mapping: type[ModuleMapper]):
-        if not issubclass(mapping, ModuleMapper):
+    def __init__(self, commands: type[ModuleMapper]):
+        if not issubclass(commands, ModuleMapper):
             raise TypeError("invalid command module map was given!")
-        self.commands = {
-            val.key: val.val for key, val in mapping.__dict__.items() if key.isupper()
-        }
+        self.commands = commands
 
     def match(self, method: str) -> typing.Any:
         # Todo: typing.Any を利用しないいい方法はないか？
-        result = self.commands.get(method)
+        f = self.commands.list_commands()
+        logger.debug(f"{method=}")
+        pprint.pprint(f, get_debug_fp())
+
+        result = f.get(method)
         if result is None:
             raise KeyError
         return result
@@ -75,7 +79,7 @@ class ExcludeCommand(exclude.ExcludeCommand):
         pass
 
 
-class MSTModuleMapper(ModuleMapper):
+class SimilarModuleMapper(ModuleMapper):
     NAIVE = CmdModuleTuple("naive", fuzzysort.NaiveReorderer)
     GREEDY = CmdModuleTuple("greedy", fuzzysort.GreedyReorderer)
     KRUSKAL = CmdModuleTuple("kruskal", fuzzysort.KruskalMSTReorderer)
@@ -109,7 +113,7 @@ class SimilarCommand(fuzzysort.SimilarCommand):
         )
 
         subcommand.add_parser(
-            MSTModuleMapper.NAIVE.key,
+            SimilarModuleMapper.NAIVE.key,
             formatter_class=SaniproHelpFormatter,
             help=(
                 "Calculates all permutations of a sequence of tokens. "
@@ -118,7 +122,7 @@ class SimilarCommand(fuzzysort.SimilarCommand):
         )
 
         subcommand.add_parser(
-            MSTModuleMapper.GREEDY.key,
+            SimilarModuleMapper.GREEDY.key,
             formatter_class=SaniproHelpFormatter,
             help=(
                 "Uses a greedy approach that always chooses the next element "
@@ -147,52 +151,52 @@ class SimilarCommand(fuzzysort.SimilarCommand):
         )
 
     @classmethod
-    def apply_from(cls, method: str | None = None) -> type[fuzzysort.MSTReorderer]:
-        """
-        method を具体的なクラスの名前にマッチングさせる。
+    def query_strategy(
+        cls, method: str | None = None
+    ) -> type[fuzzysort.ReordererStrategy] | None:
+        """Matches the methods specified on the command line
+        to the names of concrete classes.
+        Searches other than what the strategy uses MST."""
 
-        Argument:
-            method: コマンドラインで指定された方法.
-        """
-        # set default
-        default = MSTModuleMapper.GREEDY.key
+        default = SimilarModuleMapper.GREEDY.key
         if method is None:
             method = default
 
-        mapper = ModuleMatcher(MSTModuleMapper)
-        try:
-            return mapper.match(method)
-        except KeyError:
-            raise ValueError("method name is not found.")
+        mapper = ModuleMatcher(SimilarModuleMapper)
+        matched = mapper.match(method)
+
+        if issubclass(matched, fuzzysort.ReordererStrategy):
+            return matched
 
     @classmethod
     def get_reorderer(cls, cmd: "DemoCommands") -> ReordererStrategy:
         """Instanciate one reorder function from the parsed result."""
 
-        def get_class(cmd: "DemoCommands"):
+        def get_class(cmd: "DemoCommands") -> type[ReordererStrategy] | None:
             query = cmd.similar_method
             if query != "mst":
-                return cls.apply_from(method=query)
+                return cls.query_strategy(method=query)
+            else:
+                adapters = [
+                    [cmd.kruskal, SimilarModuleMapper.KRUSKAL],
+                    [cmd.prim, SimilarModuleMapper.PRIM],
+                ]
+                for _flag, _cls in adapters:
+                    if _flag and isinstance(_cls, CmdModuleTuple):
+                        # when --kruskal or --prim flag is specified
+                        return _cls.callable_name
 
-            adapters = [
-                [cmd.kruskal, MSTModuleMapper.KRUSKAL],
-                [cmd.prim, MSTModuleMapper.PRIM],
-            ]
-            for _flag, _cls in adapters:
-                if _flag:
-                    # when --kruskal or --prim flag is specified
-                    return _cls.val
+                _, fallback_cls = adapters[0]
+                if isinstance(fallback_cls, CmdModuleTuple):
+                    return fallback_cls.callable_name
 
-            _, fallback_cls = adapters[0]
-            return fallback_cls.val
+        selected_cls = get_class(cmd)
+        if selected_cls is not None:
+            if issubclass(selected_cls, ReordererStrategy):
+                logger.debug(f"selected module: {selected_cls.__name__}")
+                return selected_cls(strategy=fuzzysort.SequenceMatcherSimilarity())
 
-        cls = get_class(cmd)
-        logger.debug(f"selected module: {cls.__name__}")
-
-        if cls is None:
-            raise KeyError
-
-        return cls(strategy=fuzzysort.SequenceMatcherSimilarity())
+        raise ValueError("failed to find reorder function.")
 
     @classmethod
     def create_from_cmd(cls, cmd: "DemoCommands", *, reverse=False) -> Self:
@@ -341,7 +345,7 @@ class SortAllCommand(sort_all.SortAllCommand):
         )
 
     @classmethod
-    def apply_from(cls, *, method: str | None = None) -> functools.partial:
+    def query_strategy(cls, *, method: str | None = None) -> functools.partial:
         """
         method を具体的なクラスの名前にマッチングさせる。
 
@@ -364,7 +368,7 @@ class SortAllCommand(sort_all.SortAllCommand):
     def create_from_cmd(cls, cmd: "DemoCommands", *, reverse=False) -> Self:
         """Alternative method."""
 
-        partial = cls.apply_from(method=cmd.sort_all_method)
+        partial = cls.query_strategy(method=cmd.sort_all_method)
         return cls(partial, reverse=reverse)
 
 
@@ -407,7 +411,7 @@ class DemoCommands(CommandsBase):
     reverse = False
     seed: int | None = None
     value: float | None = None
-    similar_method = None
+    similar_method: str | None = None
     sort_all_method = None
     kruskal = None
     prim = None
