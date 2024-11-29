@@ -3,7 +3,6 @@ import logging
 import pprint
 import sys
 import time
-from code import InteractiveConsole, InteractiveInterpreter
 from collections.abc import MutableSequence
 
 from sanipro.abc import RunnerInterface, TokenInterface
@@ -12,7 +11,8 @@ from sanipro.filters.utils import collect_same_tokens
 from sanipro.parser import TokenInteractive, TokenNonInteractive
 from sanipro.utils import HasPrettyRepr
 
-from saniprocli import cli_hooks
+from saniprocli import cli_hooks, color
+from saniprocli.abc import InputStrategy
 
 from .commands import CommandsBase
 from .utils import get_debug_fp
@@ -22,7 +22,50 @@ logger_root = logging.getLogger()
 logger = logging.getLogger(__name__)
 
 
+class OnelineInputStrategy(InputStrategy):
+    """Represents the method to get a user input per prompt
+    in interactive mode.
+    It consumes just one line to get the input by a user."""
+
+    def input(self, prompt: str) -> str:
+        return input(prompt)
+
+
+class MultipleInputStrategy(InputStrategy):
+    """Represents the method to get a user input per prompt
+    in interactive mode.
+
+    It consumes multiple lines and reduce them to a string,
+    and users must confirm their input by sending EOF (^D)."""
+
+    def __init__(self):
+        super().__init__()
+        try:
+            sys.ps2
+        except AttributeError:
+            sys.ps2 = f"\001{color.CYAN}...{color.RESET}\002 "
+
+    def input(self, prompt: str) -> str:
+        buffer = []
+        _prompt = prompt
+        while True:
+            try:
+                line = input(_prompt)
+                buffer.append(line)
+                _prompt = sys.ps2
+            except EOFError:
+                if buffer:
+                    break
+                else:
+                    raise
+
+        return "".join(buffer)
+
+
 class Runner(HasPrettyRepr, RunnerInterface):
+    """Represents the common method for the program to interact
+    with the users."""
+
     def __init__(
         self, pipeline: PromptPipeline, ps1: str, prpt: type[TokenInterface]
     ) -> None:
@@ -31,10 +74,19 @@ class Runner(HasPrettyRepr, RunnerInterface):
         self.prpt = prpt
 
     @staticmethod
-    def from_args(args: CommandsBase) -> "Runner":
+    def from_args(
+        args: CommandsBase,
+        /,
+        input_strategy: type[InputStrategy] = MultipleInputStrategy,
+    ) -> "Runner":
         pipeline = args.get_pipeline()
         if args.interactive:
-            return RunnerInteractive(pipeline, ps1=args.ps1, prpt=TokenInteractive)
+            return RunnerInteractive(
+                pipeline,
+                ps1=args.ps1,
+                prpt=TokenInteractive,
+                input_strategy=input_strategy(),
+            )
         else:
             return RunnerNonInteractive(pipeline, ps1="", prpt=TokenNonInteractive)
 
@@ -76,29 +128,37 @@ class AnalyzerDiff(Analyzer):
         return stats
 
 
-class RunnerInteractive(Runner, InteractiveConsole):
+class RunnerInteractive(Runner):
+    """Represents the method for the program to interact
+    with the users.
+
+    This runner is used when the user decided to use
+    the interactive mode. This is similar what Python interpreter does like."""
+
     def __init__(
-        self, pipeline: PromptPipeline, ps1: str, prpt: type[TokenInterface]
+        self,
+        pipeline: PromptPipeline,
+        ps1: str,
+        prpt: type[TokenInterface],
+        input_strategy: InputStrategy,
     ) -> None:
         self.pipeline = pipeline
         self.ps1 = ps1
         self.prpt = prpt
+        self.input_strategy = input_strategy
 
-        InteractiveInterpreter.__init__(self)
-        self.filename = "<console>"
-        self.local_exit = False
-        self.resetbuffer()
+    def write(self, content: str):
+        sys.stdout.write(content)
 
     def run(self):
         cli_hooks.execute(cli_hooks.interactive)
-        self.interact()
 
-    def interact(self, banner=None, exitmsg=None):
         try:
             sys.ps1
         except AttributeError:
             sys.ps1 = self.ps1
 
+        banner = None
         if banner is None:
             self.write(
                 f"Sanipro (created by iigau) in interactive mode\n"
@@ -107,54 +167,43 @@ class RunnerInteractive(Runner, InteractiveConsole):
         elif banner:
             self.write("%s\n" % str(banner))
 
-        try:
-            while True:
+        while True:
+            try:
+                line = ""
+                prompt = sys.ps1
                 try:
-                    prompt = sys.ps1
-                    try:
-                        line = self.raw_input(prompt)  # type: ignore
-                    except EOFError:
-                        break
+                    line = self.input_strategy.input(prompt)
+                    if line:
+                        out = self.execute(line)
+                        self.write(f"{out}\n")
                     else:
-                        self.push(line)
-                except ValueError as e:  # like unclosed parentheses
-                    logger.fatal(f"error: {e}")
-                    self.resetbuffer()
-                except KeyboardInterrupt:
-                    self.resetbuffer()
-                    self.write("\nKeyboardInterrupt\n")
+                        self.write(f"\n")
+                except EOFError as e:
+                    break
+            except ValueError as e:  # like unclosed parentheses
+                logger.fatal(f"error: {e}")
+            except KeyboardInterrupt:
+                self.write("\nKeyboardInterrupt\n")
+        self.write(f"\n")
 
-        finally:
-            if exitmsg is None:
-                self.write("\n")
-            elif exitmsg != "":
-                self.write("%s\n" % exitmsg)
-
-    def runcode(self, code):
-        print(code)
-
-    def runsource(self, source, filename="<input>", symbol="single"):
+    def execute(self, source) -> str:
         tokens_unparsed = self.pipeline.parse(str(source), self.prpt, auto_apply=True)
         tokens = str(self.pipeline)
+        self.write(f"\n")
 
         anal = AnalyzerDiff(tokens_unparsed, self.pipeline.tokens)
         pprint.pprint(anal.get_stats(), get_debug_fp())
 
-        self.runcode(tokens)  # type: ignore
-        return False
-
-    def push(self, line, filename=None, _symbol="single"):
-        self.buffer.append(line)
-        source = "\n".join(self.buffer)
-        if filename is None:
-            filename = self.filename
-        more = self.runsource(source, filename, symbol=_symbol)
-        if not more:
-            self.resetbuffer()
-        return more
+        return tokens
 
 
 class RunnerNonInteractive(Runner):
+    """Represents the method for the program to interact
+    with the users in non-interactive mode.
+
+    Intended the case where the users feed the input from STDIN.
+    """
+
     def _run_once(self) -> None:
         sentence = None
         try:

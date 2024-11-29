@@ -1,11 +1,12 @@
 import argparse
 import functools
 import logging
+import pprint
 import sys
 import typing
-import pprint
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from typing import NamedTuple
 
 from sanipro import common
 from sanipro.compatible import Self
@@ -33,8 +34,6 @@ from saniprocli.cli_runner import Runner
 from saniprocli.commands import CommandsBase
 from saniprocli.help_formatter import SaniproHelpFormatter
 from saniprocli.utils import get_debug_fp
-
-from typing import NamedTuple
 
 logger_root = logging.getLogger()
 
