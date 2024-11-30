@@ -21,5 +21,3 @@ BG_CYAN = "\033[46m"
 BG_WHITE = "\033[47m"
 BG_DEFAULT = "\033[49m"
 RESET = "\033[0m"
-
-default = CYAN

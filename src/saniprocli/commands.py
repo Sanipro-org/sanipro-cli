@@ -4,9 +4,13 @@ import pprint
 from collections.abc import Sequence
 
 from sanipro import common
+from sanipro.parser import TokenInteractive, TokenNonInteractive
 from sanipro.utils import HasPrettyRepr
 
-from . import color
+from saniprocli import color, inputs
+from saniprocli.abc import RunnerInterface
+from saniprocli.cli_runner import RunnerInteractive, RunnerNonInteractive
+
 from .help_formatter import SaniproHelpFormatter
 from .utils import get_debug_fp, get_log_level_from
 
@@ -18,8 +22,10 @@ logger = logging.getLogger(__name__)
 class CommandsBase(HasPrettyRepr):
     input_delimiter = ","
     interactive = False
+    one_line = False
     output_delimiter = ", "
-    ps1 = f"\001{color.default}\002>>>\001{color.RESET}\002 "
+    ps1 = f"\001{color.CYAN}\002>>>\001{color.RESET}\002 "
+    ps2 = f"\001{color.CYAN}\002...\001{color.RESET}\002 "
 
     filter: str | None = None
     verbose: int | None = None
@@ -87,6 +93,16 @@ class CommandsBase(HasPrettyRepr):
         )
 
         parser.add_argument(
+            "--ps2",
+            default=cls.ps2,
+            type=str,
+            help=(
+                "The custom string that is used to wait for the next user "
+                "input of the prompts."
+            ),
+        )
+
+        parser.add_argument(
             "-i",
             "--interactive",
             default=cls.interactive,
@@ -97,6 +113,14 @@ class CommandsBase(HasPrettyRepr):
             ),
         )
 
+        parser.add_argument(
+            "-l",
+            "--one-line",
+            default=cls.one_line,
+            action="store_true",
+            help=("Whether to confirm the prompt input with a single line of input."),
+        )
+
         # This creates the global parser.
         cls.append_parser(parser)
 
@@ -104,6 +128,22 @@ class CommandsBase(HasPrettyRepr):
         cls.append_subparser(parser)
 
         return parser
+
+    def to_runner(self) -> RunnerInterface:
+        pipeline = self.get_pipeline()
+        runner = None
+        strategy = None
+
+        if self.one_line:
+            strategy = inputs.OnelineInputStrategy(self.ps1)
+        else:
+            strategy = inputs.MultipleInputStrategy(self.ps1, self.ps2)
+
+        if self.interactive:
+            runner = RunnerInteractive(pipeline, TokenInteractive, strategy)
+        else:
+            runner = RunnerNonInteractive(pipeline, TokenNonInteractive, strategy)
+        return runner
 
     def get_pipeline(self) -> common.PromptPipeline: ...
 

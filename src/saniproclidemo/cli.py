@@ -1,7 +1,10 @@
 import argparse
+import atexit
 import functools
 import logging
+import os
 import pprint
+import readline
 import sys
 import typing
 from abc import ABC, abstractmethod
@@ -29,11 +32,22 @@ from sanipro.filters.utils import (
     sort_lexicographically,
 )
 
-from saniprocli import cli_hooks
-from saniprocli.cli_runner import Runner
+from saniprocli import cli_hooks, color
 from saniprocli.commands import CommandsBase
 from saniprocli.help_formatter import SaniproHelpFormatter
 from saniprocli.utils import get_debug_fp
+
+accent_color = color.CYAN
+
+logging.basicConfig(
+    format=(
+        f"{accent_color}[%(levelname)s]{color.RESET} "
+        f"{accent_color}%(module)s/%(funcName)s{color.RESET} "
+        f"{accent_color}(%(lineno)d):{color.RESET} "
+        f"%(message)s"
+    ),
+    datefmt=r"%Y-%m-%d %H:%M:%S",
+)
 
 logger_root = logging.getLogger()
 
@@ -527,16 +541,35 @@ class DemoCommands(CommandsBase):
         return pipeline
 
 
+def prepare_readline() -> None:
+    histfile = os.path.join(os.path.expanduser("~"), ".sanipro_history")
+
+    try:
+        readline.read_history_file(histfile)
+        h_len = readline.get_current_history_length()
+    except FileNotFoundError:
+        open(histfile, "wb").close()
+        h_len = 0
+
+    def save(prev_h_len, histfile):
+        new_h_len = readline.get_current_history_length()
+        readline.set_history_length(1000)
+        readline.append_history_file(new_h_len - prev_h_len, histfile)
+
+    atexit.register(save, h_len, histfile)
+
+
 def app():
     try:
         args = DemoCommands.from_sys_argv(sys.argv[1:])
-        cli_hooks.execute(cli_hooks.init)
+        cli_hooks.on_init.append(prepare_readline)
+        cli_hooks.execute(cli_hooks.on_init)
 
         log_level = args.get_logger_level()
         logger_root.setLevel(log_level)
 
         args.debug()
-        runner = Runner.from_args(args)
+        runner = args.to_runner()
         runner.run()
     except Exception as e:
         logger.exception(f"error: {e}")
