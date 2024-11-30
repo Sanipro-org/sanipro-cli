@@ -2,20 +2,19 @@ import logging
 import sys
 import time
 
-from sanipro.abc import RunnerInterface, TokenInterface
-from sanipro.common import PromptPipeline
+from sanipro.abc import TokenInterface
 from sanipro.diff import PromptDifferenceDetector
-from sanipro.utils import HasPrettyRepr
+from sanipro.pipeline import PromptPipeline
 
 from saniprocli import cli_hooks
-from saniprocli.abc import InputStrategy
+from saniprocli.abc import InputStrategy, RunnerInterface
 
 logger_root = logging.getLogger()
 
 logger = logging.getLogger(__name__)
 
 
-def show_cli_stat(detector: PromptDifferenceDetector):
+def show_cli_stat(detector: PromptDifferenceDetector) -> None:
     items = [
         f"before -> {detector.before_num}",
         f"after -> {detector.after_num}",
@@ -32,9 +31,12 @@ def show_cli_stat(detector: PromptDifferenceDetector):
         logger.info(f"(statistics) {item}")
 
 
-class Runner(HasPrettyRepr, RunnerInterface):
-    """Represents the common method for the program to interact
-    with the users."""
+class RunnerInteractive(RunnerInterface):
+    """Represents the method for the program to interact
+    with the users.
+
+    This runner is used when the user decided to use
+    the interactive mode. This is similar what Python interpreter does like."""
 
     def __init__(
         self,
@@ -45,24 +47,11 @@ class Runner(HasPrettyRepr, RunnerInterface):
         self.pipeline = pipeline
         self.prpt = prpt
         self.input_strategy = strategy
-        logger.debug(f"runner: {type(self).__name__}")
-        logger.debug(f"strategy: {type(strategy).__name__}")
 
-
-class RunnerInteractive(Runner):
-    """Represents the method for the program to interact
-    with the users.
-
-    This runner is used when the user decided to use
-    the interactive mode. This is similar what Python interpreter does like."""
-
-    def __init__(self, pipeline, prpt, strategy):
-        super().__init__(pipeline, prpt, strategy)
-
-    def write(self, content: str):
+    def write(self, content: str) -> None:
         sys.stdout.write(content)
 
-    def run(self):
+    def run(self) -> None:
         cli_hooks.execute(cli_hooks.on_interactive)
 
         banner = None
@@ -101,15 +90,22 @@ class RunnerInteractive(Runner):
         return tokens
 
 
-class RunnerNonInteractive(Runner):
+class RunnerNonInteractive(RunnerInterface):
     """Represents the method for the program to interact
     with the users in non-interactive mode.
 
     Intended the case where the users feed the input from STDIN.
     """
 
-    def __init__(self, pipeline, prpt, strategy):
-        super().__init__(pipeline, prpt, strategy)
+    def __init__(
+        self,
+        pipeline: PromptPipeline,
+        prpt: type[TokenInterface],
+        strategy: InputStrategy,
+    ) -> None:
+        self.pipeline = pipeline
+        self.prpt = prpt
+        self.input_strategy = strategy
 
     def _run_once(self) -> None:
         sentence = None
@@ -124,5 +120,5 @@ class RunnerNonInteractive(Runner):
                 result = str(self.pipeline)
                 print(result)
 
-    def run(self):
+    def run(self) -> None:
         self._run_once()

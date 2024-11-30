@@ -11,26 +11,33 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import NamedTuple
 
-from sanipro import common
+from sanipro import pipeline
 from sanipro.compatible import Self
-from sanipro.filters import (
-    exclude,
-    fuzzysort,
-    mask,
-    random,
-    reset,
-    roundup,
-    sort,
-    sort_all,
-    unique,
-)
 from sanipro.filters.abc import ReordererStrategy
+from sanipro.filters.exclude import ExcludeCommand
+from sanipro.filters.fuzzysort import (
+    GreedyReorderer,
+    KruskalMSTReorderer,
+    NaiveReorderer,
+    PrimMSTReorderer,
+    ReordererStrategy,
+    SequenceMatcherSimilarity,
+    SimilarCommand,
+)
+from sanipro.filters.mask import MaskCommand
+from sanipro.filters.random import RandomCommand
+from sanipro.filters.reset import ResetCommand
+from sanipro.filters.roundup import RoundUpCommand
+from sanipro.filters.sort import SortCommand
+from sanipro.filters.sort_all import SortAllCommand
+from sanipro.filters.unique import UniqueCommand
 from sanipro.filters.utils import (
     sort_by_length,
     sort_by_ord_sum,
     sort_by_weight,
     sort_lexicographically,
 )
+from sanipro.modules import create_pipeline
 
 from saniprocli import cli_hooks, color
 from saniprocli.commands import CommandsBase
@@ -86,20 +93,20 @@ class ModuleMatcher:
         return result
 
 
-class ExcludeCommand(exclude.ExcludeCommand):
+class CliExcludeCommand(ExcludeCommand):
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction):
         pass
 
 
 class SimilarModuleMapper(ModuleMapper):
-    NAIVE = CmdModuleTuple("naive", fuzzysort.NaiveReorderer)
-    GREEDY = CmdModuleTuple("greedy", fuzzysort.GreedyReorderer)
-    KRUSKAL = CmdModuleTuple("kruskal", fuzzysort.KruskalMSTReorderer)
-    PRIM = CmdModuleTuple("prim", fuzzysort.PrimMSTReorderer)
+    NAIVE = CmdModuleTuple("naive", NaiveReorderer)
+    GREEDY = CmdModuleTuple("greedy", GreedyReorderer)
+    KRUSKAL = CmdModuleTuple("kruskal", KruskalMSTReorderer)
+    PRIM = CmdModuleTuple("prim", PrimMSTReorderer)
 
 
-class SimilarCommand(fuzzysort.SimilarCommand):
+class CliSimilarCommand(SimilarCommand):
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction):
         subparser_similar = subparser.add_parser(
@@ -166,7 +173,7 @@ class SimilarCommand(fuzzysort.SimilarCommand):
     @classmethod
     def query_strategy(
         cls, method: str | None = None
-    ) -> type[fuzzysort.ReordererStrategy] | None:
+    ) -> type[ReordererStrategy] | None:
         """Matches the methods specified on the command line
         to the names of concrete classes.
         Searches other than what the strategy uses MST."""
@@ -178,7 +185,7 @@ class SimilarCommand(fuzzysort.SimilarCommand):
         mapper = ModuleMatcher(SimilarModuleMapper)
         matched = mapper.match(method)
 
-        if issubclass(matched, fuzzysort.ReordererStrategy):
+        if issubclass(matched, ReordererStrategy):
             return matched
 
     @classmethod
@@ -207,7 +214,7 @@ class SimilarCommand(fuzzysort.SimilarCommand):
         if selected_cls is not None:
             if issubclass(selected_cls, ReordererStrategy):
                 logger.debug(f"selected module: {selected_cls.__name__}")
-                return selected_cls(strategy=fuzzysort.SequenceMatcherSimilarity())
+                return selected_cls(strategy=SequenceMatcherSimilarity())
 
         raise ValueError("failed to find reorder function.")
 
@@ -217,7 +224,7 @@ class SimilarCommand(fuzzysort.SimilarCommand):
         return cls(reorderer=cls.get_reorderer(cmd), reverse=reverse)
 
 
-class MaskCommand(mask.MaskCommand):
+class CliMaskCommand(MaskCommand):
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction):
         subcommand = subparser.add_parser(
@@ -244,7 +251,7 @@ class MaskCommand(mask.MaskCommand):
         )
 
 
-class RandomCommand(random.RandomCommand):
+class CliRandomCommand(RandomCommand):
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction):
         subcommand = subparser.add_parser(
@@ -263,7 +270,7 @@ class RandomCommand(random.RandomCommand):
         )
 
 
-class ResetCommand(reset.ResetCommand):
+class CliResetCommand(ResetCommand):
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction):
         subcommand = subparser.add_parser(
@@ -282,12 +289,12 @@ class ResetCommand(reset.ResetCommand):
         )
 
 
-class RoundUpCommand(roundup.RoundUpCommand):
+class CliRoundUpCommand(RoundUpCommand):
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction): ...
 
 
-class SortCommand(sort.SortCommand):
+class CliSortCommand(SortCommand):
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction):
         subcommand = subparser.add_parser(
@@ -310,7 +317,7 @@ class SortAllModuleMapper(ModuleMapper):
     ORD_SUM = CmdModuleTuple("ord-sum", sort_by_ord_sum)
 
 
-class SortAllCommand(sort_all.SortAllCommand):
+class CliSortAllCommand(SortAllCommand):
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction):
         sort_all_subparser = subparser.add_parser(
@@ -385,7 +392,7 @@ class SortAllCommand(sort_all.SortAllCommand):
         return cls(partial, reverse=reverse)
 
 
-class UniqueCommand(unique.UniqueCommand):
+class CliUniqueCommand(UniqueCommand):
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction):
         subparser_unique = subparser.add_parser(
@@ -430,13 +437,13 @@ class DemoCommands(CommandsBase):
     prim = None
 
     command_classes = (
-        MaskCommand,
-        RandomCommand,
-        ResetCommand,
-        SimilarCommand,
-        SortAllCommand,
-        SortCommand,
-        UniqueCommand,
+        CliMaskCommand,
+        CliRandomCommand,
+        CliResetCommand,
+        CliSimilarCommand,
+        CliSortAllCommand,
+        CliSortCommand,
+        CliUniqueCommand,
     )
 
     @classmethod
@@ -489,16 +496,16 @@ class DemoCommands(CommandsBase):
         for cmd in cls.command_classes:
             cmd.inject_subparser(subparser)
 
-    def _get_pipeline_from(self, use_parser_v2: bool) -> common.PromptPipeline:
-        delimiter = common.Delimiter(self.input_delimiter, self.output_delimiter)
-        pipeline = None
+    def _get_pipeline_from(self, use_parser_v2: bool) -> pipeline.PromptPipeline:
+        delimiter = pipeline.Delimiter(self.input_delimiter, self.output_delimiter)
+        pipe = None
         if not use_parser_v2:
-            pipeline = delimiter.create_pipeline(common.PromptPipelineV1)
+            pipe = create_pipeline(delimiter, pipeline.PromptPipelineV1)
         else:
-            pipeline = delimiter.create_pipeline(common.PromptPipelineV2)
-        return pipeline
+            pipe = create_pipeline(delimiter, pipeline.PromptPipelineV2)
+        return pipe
 
-    def get_pipeline(self) -> common.PromptPipeline:
+    def get_pipeline(self) -> pipeline.PromptPipeline:
         """This is a pipeline for the purpose of showcasing.
         Since all the parameters of each command is variable, the command
         sacrifies the composability.
@@ -507,13 +514,13 @@ class DemoCommands(CommandsBase):
 
         command_ids = [cmd.command_id for cmd in self.command_classes]
         command_funcs = (
-            lambda: MaskCommand(self.mask, self.replace_to),
-            lambda: RandomCommand(self.seed),
-            lambda: ResetCommand(self.value),
-            lambda: SimilarCommand.create_from_cmd(cmd=self, reverse=self.reverse),
-            lambda: SortAllCommand.create_from_cmd(cmd=self, reverse=self.reverse),
-            lambda: SortCommand(self.reverse),
-            lambda: UniqueCommand(self.reverse),
+            lambda: CliMaskCommand(self.mask, self.replace_to),
+            lambda: CliRandomCommand(self.seed),
+            lambda: CliResetCommand(self.value),
+            lambda: CliSimilarCommand.create_from_cmd(cmd=self, reverse=self.reverse),
+            lambda: CliSortAllCommand.create_from_cmd(cmd=self, reverse=self.reverse),
+            lambda: CliSortCommand(self.reverse),
+            lambda: CliUniqueCommand(self.reverse),
         )
         command_map = dict(zip(command_ids, command_funcs, strict=True))
 
@@ -526,19 +533,19 @@ class DemoCommands(CommandsBase):
 
             logger.warning("using parser_v2.")
 
-        pipeline = self._get_pipeline_from(self.use_parser_v2)
+        pipe = self._get_pipeline_from(self.use_parser_v2)
 
         # always round
-        pipeline.append_command(RoundUpCommand(self.roundup))
+        pipe.append_command(CliRoundUpCommand(self.roundup))
 
         if self.filter is not None:
             lambd = command_map[self.filter]
-            pipeline.append_command(lambd())
+            pipe.append_command(lambd())
 
         if self.exclude:
-            pipeline.append_command(ExcludeCommand(self.exclude))
+            pipe.append_command(CliExcludeCommand(self.exclude))
 
-        return pipeline
+        return pipe
 
 
 def prepare_readline() -> None:

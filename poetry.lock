@@ -26,17 +26,15 @@ description = "Sanitizes prompts."
 optional = false
 python-versions = "^3.10"
 files = []
-develop = false
+develop = true
 
 [package.dependencies]
 networkx = "^3.4.2"
 typing-extensions = "^4.12.2"
 
 [package.source]
-type = "git"
-url = "https://github.com/froggie3/sanipro.git"
-reference = "HEAD"
-resolved_reference = "b0de16464a542183075b83f93b6dd791569a203c"
+type = "directory"
+url = "../lib"
 
 [[package]]
 name = "typing-extensions"
@@ -52,4 +50,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "aac95ea3aebfaed9a7924e0ccbb051a0c541bb480d34729f23da83d82525dde3"
+content-hash = "d7054b188e8569c28fa427206dc1cc6fff24256695bf36828a891da85394f275"

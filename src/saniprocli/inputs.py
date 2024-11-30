@@ -8,11 +8,11 @@ class OnelineInputStrategy(InputStrategy):
     in interactive mode.
     It consumes just one line to get the input by a user."""
 
-    def __init__(self, ps1: str | None = ""):
+    def __init__(self, ps1: str | None = "") -> None:
         super().__init__()
         self.ps1 = ps1
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{type(self).__name__}(ps1={self.ps1})"
 
     def input(self, prompt: str | None = None) -> str:
@@ -28,7 +28,7 @@ class MultipleInputStrategy(InputStrategy):
     It consumes multiple lines and reduce them to a string,
     and users must confirm their input by sending EOF (^D)."""
 
-    def __init__(self, ps1: str = "", ps2: str = ""):
+    def __init__(self, ps1: str = "", ps2: str = "") -> None:
         super().__init__()
         self.ps1 = ps1
 
@@ -38,7 +38,7 @@ class MultipleInputStrategy(InputStrategy):
         else:
             self.ps2 = ps2
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{type(self).__name__}(ps1={self.ps1}, ps2={self.ps2})"
 
     def input(self, prompt: str | None = None) -> str:

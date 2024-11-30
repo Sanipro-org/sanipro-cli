@@ -7,7 +7,7 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-sanipro = {git = "https://github.com/froggie3/sanipro.git"}
+sanipro = {path = "../lib", develop = true}
 
 [build-system]
 requires = ["poetry-core"]

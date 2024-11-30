@@ -3,12 +3,13 @@ import logging
 import pprint
 from collections.abc import Sequence
 
-from sanipro import common
+from sanipro import pipeline
+from sanipro.compatible import Self
 from sanipro.parser import TokenInteractive, TokenNonInteractive
 from sanipro.utils import HasPrettyRepr
 
 from saniprocli import color, inputs
-from saniprocli.abc import RunnerInterface
+from saniprocli.abc import CommandsInterface, RunnerInterface
 from saniprocli.cli_runner import RunnerInteractive, RunnerNonInteractive
 
 from .help_formatter import SaniproHelpFormatter
@@ -19,7 +20,7 @@ logger_root = logging.getLogger()
 logger = logging.getLogger(__name__)
 
 
-class CommandsBase(HasPrettyRepr):
+class CommandsBase(HasPrettyRepr, CommandsInterface):
     input_delimiter = ","
     interactive = False
     one_line = False
@@ -39,11 +40,36 @@ class CommandsBase(HasPrettyRepr):
         except ValueError:
             raise ValueError("the maximum two -v flags can only be added")
 
+    def to_runner(self) -> RunnerInterface:
+        """The factory method for Runner class.
+        Instantiated instance will be switched by the command option."""
+
+        pipeline = self.get_pipeline()
+        runner = None
+        strategy = None
+
+        if self.one_line:
+            strategy = inputs.OnelineInputStrategy(self.ps1)
+        else:
+            strategy = inputs.MultipleInputStrategy(self.ps1, self.ps2)
+
+        if self.interactive:
+            runner = RunnerInteractive(pipeline, TokenInteractive, strategy)
+        else:
+            runner = RunnerNonInteractive(pipeline, TokenNonInteractive, strategy)
+        return runner
+
+    def get_pipeline(self) -> pipeline.PromptPipeline:
+        """Gets user-defined pipeline."""
+        ...
+
     def debug(self) -> None:
+        """Shows debug message"""
         pprint.pprint(self, get_debug_fp())
 
     @classmethod
     def prepare_parser(cls) -> argparse.ArgumentParser:
+        """Prepares argument parser."""
         parser = argparse.ArgumentParser(
             prog="sanipro",
             description=(
@@ -129,32 +155,14 @@ class CommandsBase(HasPrettyRepr):
 
         return parser
 
-    def to_runner(self) -> RunnerInterface:
-        pipeline = self.get_pipeline()
-        runner = None
-        strategy = None
-
-        if self.one_line:
-            strategy = inputs.OnelineInputStrategy(self.ps1)
-        else:
-            strategy = inputs.MultipleInputStrategy(self.ps1, self.ps2)
-
-        if self.interactive:
-            runner = RunnerInteractive(pipeline, TokenInteractive, strategy)
-        else:
-            runner = RunnerNonInteractive(pipeline, TokenNonInteractive, strategy)
-        return runner
-
-    def get_pipeline(self) -> common.PromptPipeline: ...
+    @classmethod
+    def append_parser(cls, parser: argparse.ArgumentParser) -> None: ...
 
     @classmethod
-    def append_parser(cls, parser: argparse.ArgumentParser): ...
+    def append_subparser(cls, parser: argparse.ArgumentParser) -> None: ...
 
     @classmethod
-    def append_subparser(cls, parser: argparse.ArgumentParser): ...
-
-    @classmethod
-    def from_sys_argv(cls, arg_val: Sequence) -> "CommandsBase":
+    def from_sys_argv(cls, arg_val: Sequence) -> Self:
         parser = cls.prepare_parser()
         args = parser.parse_args(arg_val, namespace=cls())
 
