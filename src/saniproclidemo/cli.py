@@ -40,10 +40,10 @@ from sanipro.filters.utils import (
 from sanipro.modules import create_pipeline
 
 from saniprocli import cli_hooks, color
+from saniprocli.color import style
 from saniprocli.commands import CommandsBase
 from saniprocli.help_formatter import SaniproHelpFormatter
 from saniprocli.logger import logger_fp
-from saniprocli.color import style
 
 logging.basicConfig(
     format=(
