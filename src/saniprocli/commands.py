@@ -47,20 +47,21 @@ class CommandsBase(HasPrettyRepr, CommandsInterface):
 
         pipeline = self.get_pipeline()
         runner = None
-        strategy = None
 
         ps1 = style_for_readline(self.ps1)
         ps2 = style_for_readline(self.ps2)
 
-        if self.one_line:
-            strategy = inputs.OnelineInputStrategy(ps1)
-        else:
-            strategy = inputs.MultipleInputStrategy(ps1, ps2)
+        strategy = (
+            inputs.OnelineInputStrategy(ps1)
+            if self.one_line
+            else inputs.MultipleInputStrategy(ps1, ps2)
+        )
+        runner = (
+            RunnerInteractive(pipeline, TokenInteractive, strategy)
+            if self.interactive
+            else RunnerNonInteractive(pipeline, TokenNonInteractive, strategy)
+        )
 
-        if self.interactive:
-            runner = RunnerInteractive(pipeline, TokenInteractive, strategy)
-        else:
-            runner = RunnerNonInteractive(pipeline, TokenNonInteractive, strategy)
         return runner
 
     def get_pipeline(self) -> pipeline.PromptPipeline:

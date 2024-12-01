@@ -61,7 +61,7 @@ class RunnerInteractive(RunnerInterface):
                 f"Program was launched up at {time.asctime()}.\n"
             )
         elif banner:
-            self.write("%s\n" % str(banner))
+            self.write(f"{banner}\n")
 
         while True:
             try:
@@ -79,10 +79,9 @@ class RunnerInteractive(RunnerInterface):
                 self.write("\nKeyboardInterrupt\n")
         self.write(f"\n")
 
-    def execute(self, source) -> str:
-        tokens_unparsed = self.pipeline.parse(str(source), self.prpt, auto_apply=True)
+    def execute(self, source: str) -> str:
+        tokens_unparsed = self.pipeline.parse(source, self.prpt, auto_apply=True)
         tokens = str(self.pipeline)
-        # self.write(f"\n")
 
         detector = PromptDifferenceDetector(tokens_unparsed, self.pipeline.tokens)
         show_cli_stat(detector)
