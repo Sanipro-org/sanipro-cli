@@ -42,16 +42,12 @@ from sanipro.modules import create_pipeline
 from saniprocli import cli_hooks, color
 from saniprocli.commands import CommandsBase
 from saniprocli.help_formatter import SaniproHelpFormatter
-from saniprocli.utils import get_debug_fp
-
-accent_color = color.CYAN
+from saniprocli.logger import logger_fp
+from saniprocli.color import style
 
 logging.basicConfig(
     format=(
-        f"{accent_color}[%(levelname)s]{color.RESET} "
-        f"{accent_color}%(module)s/%(funcName)s{color.RESET} "
-        f"{accent_color}(%(lineno)d):{color.RESET} "
-        f"%(message)s"
+        style("[%(levelname)s] %(module)s/%(funcName)s (%(lineno)d):") + " %(message)s"
     ),
     datefmt=r"%Y-%m-%d %H:%M:%S",
 )
@@ -85,7 +81,7 @@ class ModuleMatcher:
         # Todo: typing.Any を利用しないいい方法はないか？
         f = self.commands.list_commands()
         logger.debug(f"{method=}")
-        pprint.pprint(f, get_debug_fp())
+        pprint.pprint(f, logger_fp)
 
         result = f.get(method)
         if result is None:

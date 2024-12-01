@@ -8,12 +8,13 @@ from sanipro.compatible import Self
 from sanipro.parser import TokenInteractive, TokenNonInteractive
 from sanipro.utils import HasPrettyRepr
 
-from saniprocli import color, inputs
+from saniprocli import inputs
 from saniprocli.abc import CommandsInterface, RunnerInterface
 from saniprocli.cli_runner import RunnerInteractive, RunnerNonInteractive
 
+from .color import style_for_readline
 from .help_formatter import SaniproHelpFormatter
-from .utils import get_debug_fp, get_log_level_from
+from .logger import get_log_level_from, logger_fp
 
 logger_root = logging.getLogger()
 
@@ -25,8 +26,8 @@ class CommandsBase(HasPrettyRepr, CommandsInterface):
     interactive = False
     one_line = False
     output_delimiter = ", "
-    ps1 = f"\001{color.CYAN}\002>>>\001{color.RESET}\002 "
-    ps2 = f"\001{color.CYAN}\002...\001{color.RESET}\002 "
+    ps1 = f">>> "
+    ps2 = f"... "
 
     filter: str | None = None
     verbose: int | None = None
@@ -48,10 +49,13 @@ class CommandsBase(HasPrettyRepr, CommandsInterface):
         runner = None
         strategy = None
 
+        ps1 = style_for_readline(self.ps1)
+        ps2 = style_for_readline(self.ps2)
+
         if self.one_line:
-            strategy = inputs.OnelineInputStrategy(self.ps1)
+            strategy = inputs.OnelineInputStrategy(ps1)
         else:
-            strategy = inputs.MultipleInputStrategy(self.ps1, self.ps2)
+            strategy = inputs.MultipleInputStrategy(ps1, ps2)
 
         if self.interactive:
             runner = RunnerInteractive(pipeline, TokenInteractive, strategy)
@@ -65,7 +69,7 @@ class CommandsBase(HasPrettyRepr, CommandsInterface):
 
     def debug(self) -> None:
         """Shows debug message"""
-        pprint.pprint(self, get_debug_fp())
+        pprint.pprint(self, logger_fp)
 
     @classmethod
     def prepare_parser(cls) -> argparse.ArgumentParser:

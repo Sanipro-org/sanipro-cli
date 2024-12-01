@@ -8,6 +8,7 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.10"
 sanipro = {path = "../lib", develop = true}
+click = "^8.1.7"
 
 [build-system]
 requires = ["poetry-core"]
