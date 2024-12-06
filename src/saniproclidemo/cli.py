@@ -13,7 +13,6 @@ from typing import NamedTuple
 
 from sanipro import pipeline
 from sanipro.abc import MutablePrompt, Prompt
-from sanipro.compatible import Self
 from sanipro.filters.abc import Command, ReordererStrategy
 from sanipro.filters.exclude import ExcludeCommand
 from sanipro.filters.fuzzysort import (
@@ -40,9 +39,9 @@ from sanipro.filters.utils import (
 )
 from sanipro.modules import create_pipeline
 
-from saniprocli import cli_hooks, color
+from saniprocli import cli_hooks
 from saniprocli.color import style
-from saniprocli.commands import CommandsBase
+from saniprocli.commands import CliArgsNamespaceDefault, CliCommands
 from saniprocli.help_formatter import SaniproHelpFormatter
 from saniprocli.logger import logger_fp
 
@@ -94,15 +93,12 @@ class CliCommandInterface(ABC):
     @abstractmethod
     def __init__(self, command: Command) -> None: ...
 
-    @abstractmethod
-    def execute(self, prompt: Prompt) -> MutablePrompt: ...
-
     @classmethod
     @abstractmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None: ...
 
 
-class CliCommandBase(CliCommandInterface):
+class CliCommandBase(CliCommandInterface, Command):
     command_id: str
     command: Command
 
@@ -214,10 +210,10 @@ class CliSimilarCommand(CliCommandBase):
         return None
 
     @classmethod
-    def get_reorderer(cls, cmd: "DemoCommands") -> ReordererStrategy:
+    def get_reorderer(cls, cmd: "CliArgsNamespaceDemo") -> ReordererStrategy:
         """Instanciate one reorder function from the parsed result."""
 
-        def get_class(cmd: "DemoCommands") -> type[ReordererStrategy] | None:
+        def get_class(cmd: "CliArgsNamespaceDemo") -> type[ReordererStrategy] | None:
             query = cmd.similar_method
             if query != "mst":
                 return cls.query_strategy(method=query)
@@ -245,7 +241,9 @@ class CliSimilarCommand(CliCommandBase):
         raise ValueError("failed to find reorder function.")
 
     @classmethod
-    def create_from_cmd(cls, cmd: "DemoCommands", *, reverse=False) -> Self:
+    def create_from_cmd(
+        cls, cmd: "CliArgsNamespaceDemo", *, reverse=False
+    ) -> SimilarCommand:
         """Alternative method."""
         return SimilarCommand(reorderer=cls.get_reorderer(cmd), reverse=reverse)
 
@@ -420,7 +418,9 @@ class CliSortAllCommand(CliCommandBase):
             raise ValueError("method name is not found.")
 
     @classmethod
-    def create_from_cmd(cls, cmd: "DemoCommands", *, reverse=False) -> Self:
+    def create_from_cmd(
+        cls, cmd: "CliArgsNamespaceDemo", *, reverse=False
+    ) -> SortAllCommand:
         """Alternative method."""
 
         partial = cls.query_strategy(method=cmd.sort_all_method)
@@ -448,24 +448,27 @@ class CliUniqueCommand(CliCommandBase):
         )
 
 
-class DemoCommands(CommandsBase):
+class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
     """Custom subcommand implementation by user"""
 
     # global options
     exclude: Sequence[str]
     roundup = 2
-    replace_to = ""
+    replace_to: str
     mask: Sequence[str]
-    use_parser_v2 = False
+    use_parser_v2: bool
+
+    # subcommand
+    filter: str
 
     # subcommands options
-    reverse = False
-    seed: int | None = None
-    value: float | None = None
-    similar_method: str | None = None
-    sort_all_method = None
-    kruskal = None
-    prim = None
+    reverse: bool
+    seed: int
+    value: float
+    similar_method: str
+    sort_all_method: str
+    kruskal: bool
+    prim: bool
 
     command_classes = (
         CliMaskCommand,
@@ -477,12 +480,11 @@ class DemoCommands(CommandsBase):
         CliUniqueCommand,
     )
 
-    @classmethod
-    def append_parser(cls, parser: argparse.ArgumentParser) -> None:
+    def _do_append_parser(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
             "-u",
             "--roundup",
-            default=cls.roundup,
+            default=self.roundup,
             type=int,
             help=(
                 "All the token with weights (x > 1.0 or x < 1.0) "
@@ -512,8 +514,7 @@ class DemoCommands(CommandsBase):
             ),
         )
 
-    @classmethod
-    def append_subparser(cls, parser: argparse.ArgumentParser) -> None:
+    def _do_append_subparser(self, parser: argparse.ArgumentParser) -> None:
         subparser = parser.add_subparsers(
             title="filter",
             description=(
@@ -524,17 +525,13 @@ class DemoCommands(CommandsBase):
             metavar="FILTER",
         )
 
-        for cmd in cls.command_classes:
+        for cmd in self.command_classes:
             cmd.inject_subparser(subparser)
 
-    def _get_pipeline_from(self, use_parser_v2: bool) -> pipeline.PromptPipeline:
-        delimiter = pipeline.Delimiter(self.input_delimiter, self.output_delimiter)
-        pipe = None
-        if not use_parser_v2:
-            pipe = create_pipeline(delimiter, pipeline.PromptPipelineV1)
-        else:
-            pipe = create_pipeline(delimiter, pipeline.PromptPipelineV2)
-        return pipe
+
+class CliCommandsDemo(CliCommands):
+    def __init__(self, args: CliArgsNamespaceDemo) -> None:
+        self._args = args
 
     def get_pipeline(self) -> pipeline.PromptPipeline:
         """This is a pipeline for the purpose of showcasing.
@@ -543,38 +540,45 @@ class DemoCommands(CommandsBase):
         It is good for you to create your own pipeline, and name it
         so you can use it as a preset."""
 
-        command_ids = [cmd.command_id for cmd in self.command_classes]
+        args = self._args
+
+        command_ids = [cmd.command_id for cmd in args.command_classes]
         command_funcs = (
-            lambda: CliMaskCommand(MaskCommand(self.mask, self.replace_to)),
-            lambda: CliRandomCommand(RandomCommand(self.seed)),
-            lambda: CliResetCommand(ResetCommand(self.value)),
-            lambda: CliSimilarCommand.create_from_cmd(cmd=self, reverse=self.reverse),
-            lambda: CliSortAllCommand.create_from_cmd(cmd=self, reverse=self.reverse),
-            lambda: CliSortCommand(SortCommand(self.reverse)),
-            lambda: CliUniqueCommand(UniqueCommand(self.reverse)),
+            lambda: CliMaskCommand(MaskCommand(args.mask, args.replace_to)),
+            lambda: CliRandomCommand(RandomCommand(args.seed)),
+            lambda: CliResetCommand(ResetCommand(args.value)),
+            lambda: CliSimilarCommand.create_from_cmd(cmd=args, reverse=args.reverse),
+            lambda: CliSortAllCommand.create_from_cmd(cmd=args, reverse=args.reverse),
+            lambda: CliSortCommand(SortCommand(args.reverse)),
+            lambda: CliUniqueCommand(UniqueCommand(args.reverse)),
         )
         command_map = dict(zip(command_ids, command_funcs, strict=True))
 
-        if self.use_parser_v2:
-            if self.filter in command_ids:
+        if args.use_parser_v2:
+            if args.filter in command_ids:
                 raise NotImplementedError(
-                    f"the '{self.filter}' command is not available "
+                    f"the '{args.filter}' command is not available "
                     "when using parse_v2."
                 )
 
             logger.warning("using parser_v2.")
 
-        pipe = self._get_pipeline_from(self.use_parser_v2)
+        delimiter = pipeline.Delimiter(args.input_delimiter, args.output_delimiter)
+        pipe = (
+            create_pipeline(delimiter, pipeline.PromptPipelineV2)
+            if args.use_parser_v2
+            else create_pipeline(delimiter, pipeline.PromptPipelineV1)
+        )
 
         # always round
-        pipe.append_command(CliRoundUpCommand(RoundUpCommand(self.roundup)))
+        pipe.append_command(CliRoundUpCommand(RoundUpCommand(args.roundup)))
 
-        if self.filter is not None:
-            lambd = command_map[self.filter]
+        if args.filter is not None:
+            lambd = command_map[args.filter]
             pipe.append_command(lambd())
 
-        if self.exclude:
-            pipe.append_command(CliExcludeCommand(ExcludeCommand(self.exclude)))
+        if args.exclude:
+            pipe.append_command(CliExcludeCommand(ExcludeCommand(args.exclude)))
 
         return pipe
 
@@ -598,15 +602,19 @@ def prepare_readline() -> None:
 
 def app():
     try:
-        args = DemoCommands.from_sys_argv(sys.argv[1:])
+        args = CliArgsNamespaceDemo().from_sys_argv(sys.argv[1:])
+        cli_commands = CliCommandsDemo(args)
+
         cli_hooks.on_init.append(prepare_readline)
         cli_hooks.execute(cli_hooks.on_init)
 
-        log_level = args.get_logger_level()
+        for key, val in args.__dict__.items():
+            logger.debug(f"(settings) {key} = {val!r}")
+
+        log_level = cli_commands.get_logger_level()
         logger_root.setLevel(log_level)
 
-        args.debug()
-        runner = args.to_runner()
+        runner = cli_commands.to_runner()
         runner.run()
     except Exception as e:
         logger.exception(f"error: {e}")

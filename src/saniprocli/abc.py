@@ -1,7 +1,8 @@
 import argparse
 from abc import ABC, abstractmethod
 
-from sanipro.abc import PromptPipelineInterface, TokenInterface
+from sanipro.abc import MutablePrompt, Prompt, PromptPipelineInterface, TokenInterface
+from sanipro.pipeline import PromptPipeline
 
 
 class InputStrategy(ABC):
@@ -30,23 +31,37 @@ class RunnerInterface(ABC):
     def run(self): ...
 
 
+class CommandExecutable(ABC):
+    @abstractmethod
+    def execute(self, prompt: Prompt) -> MutablePrompt: ...
+
+
+class ParserAppendable:
+    @abstractmethod
+    def _append_parser(self, parser: argparse.ArgumentParser) -> None:
+        """Appends user-defined parser."""
+        ...
+
+
+class SubParserAppendable:
+    @abstractmethod
+    def _append_subparser(self, parser: argparse.ArgumentParser) -> None:
+        """Appends user-defined subparser."""
+        ...
+
+
+class CliArgsNamespace(ParserAppendable, SubParserAppendable): ...
+
+
+class PipelineGettable:
+    @abstractmethod
+    def get_pipeline(self) -> PromptPipeline:
+        """Gets user-defined pipeline."""
+        ...
+
+
 class CommandsInterface(ABC):
     """Custom subcommand implementation by user must implement
     the method of these."""
 
-    @abstractmethod
-    def get_pipeline(self) -> PromptPipelineInterface:
-        """Gets user-defined pipeline."""
-        ...
-
-    @classmethod
-    @abstractmethod
-    def append_parser(cls, parser: argparse.ArgumentParser) -> None:
-        """Appends user-defined parser."""
-        ...
-
-    @classmethod
-    @abstractmethod
-    def append_subparser(cls, parser: argparse.ArgumentParser) -> None:
-        """Appends user-defined subparser."""
-        ...
+    ...
