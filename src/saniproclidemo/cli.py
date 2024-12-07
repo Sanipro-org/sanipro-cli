@@ -437,7 +437,6 @@ class CliUniqueCommand(CliCommandBase):
             formatter_class=SaniproHelpFormatter,
             help="Removes duplicated tokens, and uniquify them.",
             description="Removes duplicated tokens, and uniquify them.",
-            epilog="",
         )
 
         subparser_unique.add_argument(

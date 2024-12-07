@@ -36,22 +36,30 @@ class CliArgsNamespaceDefault(HasPrettyRepr, CliArgsNamespace):
         """Add parser for functions included by default."""
 
         parser.add_argument(
-            "-v",
-            "--verbose",
-            action="count",
-            help=(
-                "Switch to display the extra logs for nerds, "
-                "This may be useful for debugging."
-                "Adding more flags causes your terminal more messier."
-            ),
-        )
-
-        parser.add_argument(
             "-d",
             "--input-delimiter",
             type=str,
             default=self.input_delimiter,
-            help=("Preferred delimiter string for the original prompts. " ""),
+            help=("Preferred delimiter string for the original prompts."),
+        )
+
+        parser.add_argument(
+            "-i",
+            "--interactive",
+            default=self.interactive,
+            action="store_true",
+            help=(
+                "Provides the REPL interface to play with prompts. "
+                "The program behaves like the Python interpreter."
+            ),
+        )
+
+        parser.add_argument(
+            "-l",
+            "--one-line",
+            default=self.one_line,
+            action="store_true",
+            help=("Whether to confirm the prompt input with a single line of input."),
         )
 
         parser.add_argument(
@@ -59,7 +67,7 @@ class CliArgsNamespaceDefault(HasPrettyRepr, CliArgsNamespace):
             "--output-delimiter",
             default=self.output_delimiter,
             type=str,
-            help=("Preferred delimiter string for the processed prompts. " ""),
+            help=("Preferred delimiter string for the processed prompts."),
         )
 
         parser.add_argument(
@@ -84,22 +92,14 @@ class CliArgsNamespaceDefault(HasPrettyRepr, CliArgsNamespace):
         )
 
         parser.add_argument(
-            "-i",
-            "--interactive",
-            default=self.interactive,
-            action="store_true",
+            "-v",
+            "--verbose",
+            action="count",
             help=(
-                "Provides the REPL interface to play with prompts. "
-                "The program behaves like the Python interpreter."
+                "Switch to display the extra logs for nerds, "
+                "This may be useful for debugging. "
+                "Adding more flags causes your terminal more messier."
             ),
-        )
-
-        parser.add_argument(
-            "-l",
-            "--one-line",
-            default=self.one_line,
-            action="store_true",
-            help=("Whether to confirm the prompt input with a single line of input."),
         )
 
         self._do_append_parser(parser)
