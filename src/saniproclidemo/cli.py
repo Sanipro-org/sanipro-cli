@@ -41,7 +41,7 @@ from sanipro.modules import create_pipeline
 from sanipro.parser import TokenInteractive, TokenNonInteractive
 
 from saniprocli import cli_hooks, inputs
-from saniprocli.abc import RunnerInterface
+from saniprocli.abc import InputStrategy, RunnerInterface
 from saniprocli.cli_runner import (
     DifferenceCalculator,
     IntersectionCalculator,
@@ -591,45 +591,50 @@ class CliCommandsDemo(CliCommands):
     def __init__(self, args: CliArgsNamespaceDemo) -> None:
         self._args = args
 
+    def _get_strategy(self) -> InputStrategy:
+        return (
+            inputs.OnelineInputStrategy(self._args.ps1)
+            if self._args.one_line
+            else inputs.MultipleInputStrategy(self._args.ps1, self._args.ps2)
+        )
+
+    def _get_runner(self) -> RunnerInterface:
+        pipe = self.get_pipeline()
+        strategy = self._get_strategy()
+        args = self._args
+
+        if args.interactive:
+            if args.operation_id == "filter":
+                return RunnerInteractiveSingle(pipe, TokenInteractive, strategy)
+            elif args.operation_id == "set-operation":
+                if args.set_op_id is None:
+                    raise Exception("set operation id is not set")
+
+                calculators = {
+                    "union": UnionCalculator,
+                    "diff": DifferenceCalculator,
+                    "intersection": IntersectionCalculator,
+                    "xor": SymmetricDifferenceCalculator,
+                }
+                try:
+                    calculator_cls = calculators[args.set_op_id]
+                    calculator_inst = calculator_cls()
+                    return RunnerInteractiveMultiple(
+                        pipe, TokenInteractive, strategy, calculator_inst
+                    )
+                except KeyError:
+                    # TODO
+                    raise
+        else:
+            return RunnerNonInteractiveSingle(pipe, TokenNonInteractive, strategy)
+
+        raise Exception("any runner module not found")
+
     def to_runner(self) -> RunnerInterface:
         """The factory method for Runner class.
         Instantiated instance will be switched by the command option."""
 
-        pipe = self.get_pipeline()
-        ps1 = self._args.ps1
-        ps2 = self._args.ps2
-
-        strategy = (
-            inputs.OnelineInputStrategy(ps1)
-            if self._args.one_line
-            else inputs.MultipleInputStrategy(ps1, ps2)
-        )
-        runner = (
-            RunnerInteractiveSingle(pipe, TokenInteractive, strategy)
-            if self._args.interactive
-            else RunnerNonInteractiveSingle(pipe, TokenNonInteractive, strategy)
-        )
-
-        if self._args.interactive and self._args.operation_id is not None:
-            if self._args.set_op_id is None:
-                raise Exception("set operation id is not set")
-
-            calculators = {
-                "union": UnionCalculator,
-                "diff": DifferenceCalculator,
-                "intersection": IntersectionCalculator,
-                "xor": SymmetricDifferenceCalculator,
-            }
-            try:
-                calculator_cls = calculators[self._args.set_op_id]
-                calculator_inst = calculator_cls()
-                runner = RunnerInteractiveMultiple(
-                    pipe, TokenInteractive, strategy, calculator_inst
-                )
-            except KeyError:
-                # TODO
-                raise
-
+        runner = self._get_runner()
         return runner
 
     def get_pipeline(self) -> pipeline.PromptPipeline:
