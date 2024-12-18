@@ -41,46 +41,43 @@ class RunnerInteractive(RunnerInterface):
     def __init__(
         self,
         pipeline: PromptPipeline,
-        prpt: type[TokenInterface],
+        token_cls: type[TokenInterface],
         strategy: InputStrategy,
     ) -> None:
         self.pipeline = pipeline
-        self.prpt = prpt
+        self._token_cls = token_cls
         self.input_strategy = strategy
-
-    def write(self, content: str) -> None:
-        sys.stdout.write(content)
+        self._write = sys.stdout.write
 
     def run(self) -> None:
         cli_hooks.execute(cli_hooks.on_interactive)
 
         banner = None
         if banner is None:
-            self.write(
+            self._write(
                 f"Sanipro (created by iigau) in interactive mode\n"
                 f"Program was launched up at {time.asctime()}.\n"
             )
         elif banner:
-            self.write(f"{banner}\n")
+            self._write(f"{banner}\n")
 
         while True:
             try:
-                line = ""
                 try:
-                    line = self.input_strategy.input()
-                    if line:
-                        out = self.execute(line)
-                        self.write(f"{out}\n")
+                    prompt_input = self.input_strategy.input()
+                    if prompt_input:
+                        out = self._execute(prompt_input)
+                        self._write(f"{out}\n")
                 except EOFError as e:
                     break
             except ValueError as e:  # like unclosed parentheses
                 logger.fatal(f"error: {e}")
             except KeyboardInterrupt:
-                self.write("\nKeyboardInterrupt\n")
-        self.write(f"\n")
+                self._write("\nKeyboardInterrupt\n")
+        self._write(f"\n")
 
-    def execute(self, source: str) -> str:
-        tokens_unparsed = self.pipeline.parse(source, self.prpt, auto_apply=True)
+    def _execute(self, source: str) -> str:
+        tokens_unparsed = self.pipeline.parse(source, self._token_cls, auto_apply=True)
         tokens = str(self.pipeline)
 
         detector = PromptDifferenceDetector(tokens_unparsed, self.pipeline.tokens)
@@ -99,11 +96,11 @@ class RunnerNonInteractive(RunnerInterface):
     def __init__(
         self,
         pipeline: PromptPipeline,
-        prpt: type[TokenInterface],
+        token_cls: type[TokenInterface],
         strategy: InputStrategy,
     ) -> None:
         self.pipeline = pipeline
-        self.prpt = prpt
+        self._token_cls = token_cls
         self.input_strategy = strategy
 
     def _run_once(self) -> None:
@@ -115,7 +112,7 @@ class RunnerNonInteractive(RunnerInterface):
             sys.exit(1)
         finally:
             if sentence is not None:
-                self.pipeline.parse(str(sentence), self.prpt, auto_apply=True)
+                self.pipeline.parse(str(sentence), self._token_cls, auto_apply=True)
                 result = str(self.pipeline)
                 print(result)
 
