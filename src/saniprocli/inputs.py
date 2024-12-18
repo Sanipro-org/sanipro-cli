@@ -2,23 +2,25 @@ import sys
 
 from saniprocli.abc import InputStrategy
 
+from .color import style_for_readline
+
 
 class OnelineInputStrategy(InputStrategy):
     """Represents the method to get a user input per prompt
     in interactive mode.
     It consumes just one line to get the input by a user."""
 
-    def __init__(self, ps1: str | None = "") -> None:
+    def __init__(self, ps1: str = "") -> None:
         super().__init__()
         self.ps1 = ps1
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(ps1={self.ps1})"
 
-    def input(self, prompt: str | None = None) -> str:
-        if prompt is None:
+    def input(self, prompt: str = "") -> str:
+        if prompt == "":
             prompt = self.ps1
-        return input(prompt)
+        return input(style_for_readline(prompt))
 
 
 class MultipleInputStrategy(InputStrategy):
@@ -41,10 +43,10 @@ class MultipleInputStrategy(InputStrategy):
     def __repr__(self) -> str:
         return f"{type(self).__name__}(ps1={self.ps1}, ps2={self.ps2})"
 
-    def input(self, prompt: str | None = None) -> str:
+    def input(self, prompt: str = "") -> str:
         buffer = []
-        _prompt = None
-        if prompt is not None:
+        _prompt = ""
+        if prompt is not "":
             self.ps1 = prompt
             self.ps2 = prompt
         else:
@@ -52,7 +54,7 @@ class MultipleInputStrategy(InputStrategy):
 
         while True:
             try:
-                line = input(_prompt)
+                line = input(style_for_readline(_prompt))
                 buffer.append(line)
                 _prompt = self.ps2
             except EOFError:

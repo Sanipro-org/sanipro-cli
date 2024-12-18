@@ -15,7 +15,9 @@ def style_for_readline(text: str) -> str:
     """Styles a text with ANSI style and readline compatibility,
     and returns the new string."""
     re_escaped = re.compile(r"(\033\[\d+m)")
-    _text = style(text)
+    _style = functools.partial(click.style, fg=color_foreground)
+
+    _text = _style(text)
     if text == _text:
         return text
 

@@ -9,9 +9,8 @@ from sanipro.utils import HasPrettyRepr
 
 from saniprocli import inputs
 from saniprocli.abc import CliArgsNamespace, PipelineGettable, RunnerInterface
-from saniprocli.cli_runner import RunnerInteractive, RunnerNonInteractive
+from saniprocli.cli_runner import RunnerInteractiveSingle, RunnerNonInteractiveSingle
 
-from .color import style_for_readline
 from .help_formatter import SaniproHelpFormatter
 from .logger import get_log_level_from
 
@@ -101,7 +100,6 @@ class CliArgsNamespaceDefault(HasPrettyRepr, CliArgsNamespace):
                 "Adding more flags causes your terminal more messier."
             ),
         )
-
         self._do_append_parser(parser)
 
     def _do_append_parser(self, parser: argparse.ArgumentParser) -> None:
@@ -149,8 +147,8 @@ class CliCommands(PipelineGettable):
         Instantiated instance will be switched by the command option."""
 
         pipe = self.get_pipeline()
-        ps1 = style_for_readline(self._args.ps1)
-        ps2 = style_for_readline(self._args.ps2)
+        ps1 = self._args.ps1
+        ps2 = self._args.ps2
 
         strategy = (
             inputs.OnelineInputStrategy(ps1)
@@ -158,9 +156,9 @@ class CliCommands(PipelineGettable):
             else inputs.MultipleInputStrategy(ps1, ps2)
         )
         runner = (
-            RunnerInteractive(pipe, TokenInteractive, strategy)
+            RunnerInteractiveSingle(pipe, TokenInteractive, strategy)
             if self._args.interactive
-            else RunnerNonInteractive(pipe, TokenNonInteractive, strategy)
+            else RunnerNonInteractiveSingle(pipe, TokenNonInteractive, strategy)
         )
 
         return runner

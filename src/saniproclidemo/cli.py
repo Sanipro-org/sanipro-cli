@@ -38,8 +38,19 @@ from sanipro.filters.utils import (
     sort_lexicographically,
 )
 from sanipro.modules import create_pipeline
+from sanipro.parser import TokenInteractive, TokenNonInteractive
 
-from saniprocli import cli_hooks
+from saniprocli import cli_hooks, inputs
+from saniprocli.abc import RunnerInterface
+from saniprocli.cli_runner import (
+    DifferenceCalculator,
+    IntersectionCalculator,
+    RunnerInteractiveMultiple,
+    RunnerInteractiveSingle,
+    RunnerNonInteractiveSingle,
+    SymmetricDifferenceCalculator,
+    UnionCalculator,
+)
 from saniprocli.color import style
 from saniprocli.commands import CliArgsNamespaceDefault, CliCommands
 from saniprocli.help_formatter import SaniproHelpFormatter
@@ -353,18 +364,18 @@ class CliSortAllCommand(CliCommandBase):
 
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction):
-        sort_all_subparser = subparser.add_parser(
+        parser = subparser.add_parser(
             cls.command_id,
             formatter_class=SaniproHelpFormatter,
             help="Reorders all the prompts.",
             description="Reorders all the prompts.",
         )
 
-        sort_all_subparser.add_argument(
+        parser.add_argument(
             "-r", "--reverse", action="store_true", help="With reversed order."
         )
 
-        subcommand = sort_all_subparser.add_subparsers(
+        subcommand = parser.add_subparsers(
             title=cls.command_id,
             description="The available method to sort the tokens.",
             dest="sort_all_method",
@@ -432,14 +443,14 @@ class CliUniqueCommand(CliCommandBase):
 
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction):
-        subparser_unique = subparser.add_parser(
+        parser = subparser.add_parser(
             cls.command_id,
             formatter_class=SaniproHelpFormatter,
             help="Removes duplicated tokens, and uniquify them.",
             description="Removes duplicated tokens, and uniquify them.",
         )
 
-        subparser_unique.add_argument(
+        parser.add_argument(
             "-r",
             "--reverse",
             action="store_true",
@@ -457,10 +468,14 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
     mask: Sequence[str]
     use_parser_v2: bool
 
-    # subcommand
-    filter: str
+    # 'dest' name for general operations
+    operation_id = str  # may be 'filter', 'set_op', and more
 
-    # subcommands options
+    # list of 'dest' name for subcommands
+    filter_id: str | None = None  # may be 'unique', 'reset' and more
+    set_op_id: str | None = None  # may be 'union', 'xor', and more
+
+    # subcommands.filter options
     reverse: bool
     seed: int
     value: float
@@ -513,24 +528,109 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
             ),
         )
 
-    def _do_append_subparser(self, parser: argparse.ArgumentParser) -> None:
+    def _add_subparser_filter(self, parser: argparse.ArgumentParser) -> None:
         subparser = parser.add_subparsers(
             title="filter",
             description=(
                 "List of available filters that can be applied to the prompt. "
                 "Just one filter can be applied at once."
             ),
-            dest="filter",
+            dest="filter_id",
             metavar="FILTER",
         )
 
         for cmd in self.command_classes:
             cmd.inject_subparser(subparser)
 
+    def _add_subparser_set_operation(self, parser: argparse.ArgumentParser) -> None:
+        subparser = parser.add_subparsers(
+            title="set-operation",
+            description="Applies a set operation to the two prompts.",
+            help="List of available set operations to the two prompts.",
+            dest="set_op_id",
+            metavar="SET_OPERATION",
+        )
+
+        subparser.add_parser("union", help=("Marge both prompts into one."))
+
+        subparser.add_parser(
+            "intersection",
+            help=("Extract only the same tokens that appear in both prompts."),
+        )
+
+        subparser.add_parser(
+            "xor", help=("Calculate the symmetrical difference between the prompts.")
+        )
+
+        subparser.add_parser(
+            "diff", help=("Calculate the set difference between the prompts.")
+        )
+
+    def _do_append_subparser(self, parser: argparse.ArgumentParser) -> None:
+        subparser = parser.add_subparsers(title="operations", dest="operation_id")
+
+        parser_filter = subparser.add_parser(
+            name="filter",
+            formatter_class=SaniproHelpFormatter,
+            description=("Applies a filter to the prompt."),
+            help=("Applies a filter to the prompt."),
+        )
+
+        parser_set_operation = subparser.add_parser(
+            name="set-operation",
+            formatter_class=SaniproHelpFormatter,
+            description=("Applies a set operation to the two prompts."),
+            help=("Applies a set operation to the two prompts."),
+        )
+
+        self._add_subparser_filter(parser_filter)
+        self._add_subparser_set_operation(parser_set_operation)
+
 
 class CliCommandsDemo(CliCommands):
     def __init__(self, args: CliArgsNamespaceDemo) -> None:
         self._args = args
+
+    def to_runner(self) -> RunnerInterface:
+        """The factory method for Runner class.
+        Instantiated instance will be switched by the command option."""
+
+        pipe = self.get_pipeline()
+        ps1 = self._args.ps1
+        ps2 = self._args.ps2
+
+        strategy = (
+            inputs.OnelineInputStrategy(ps1)
+            if self._args.one_line
+            else inputs.MultipleInputStrategy(ps1, ps2)
+        )
+        runner = (
+            RunnerInteractiveSingle(pipe, TokenInteractive, strategy)
+            if self._args.interactive
+            else RunnerNonInteractiveSingle(pipe, TokenNonInteractive, strategy)
+        )
+
+        if self._args.interactive and self._args.operation_id is not None:
+            if self._args.set_op_id is None:
+                raise Exception("set operation id is not set")
+
+            calculators = {
+                "union": UnionCalculator,
+                "diff": DifferenceCalculator,
+                "intersection": IntersectionCalculator,
+                "xor": SymmetricDifferenceCalculator,
+            }
+            try:
+                calculator_cls = calculators[self._args.set_op_id]
+                calculator_inst = calculator_cls()
+                runner = RunnerInteractiveMultiple(
+                    pipe, TokenInteractive, strategy, calculator_inst
+                )
+            except KeyError:
+                # TODO
+                raise
+
+        return runner
 
     def get_pipeline(self) -> pipeline.PromptPipeline:
         """This is a pipeline for the purpose of showcasing.
@@ -554,9 +654,9 @@ class CliCommandsDemo(CliCommands):
         command_map = dict(zip(command_ids, command_funcs, strict=True))
 
         if args.use_parser_v2:
-            if args.filter in command_ids:
+            if args.filter_id in command_ids:
                 raise NotImplementedError(
-                    f"the '{args.filter}' command is not available "
+                    f"the '{args.filter_id}' command is not available "
                     "when using parse_v2."
                 )
 
@@ -572,8 +672,8 @@ class CliCommandsDemo(CliCommands):
         # always round
         pipe.append_command(CliRoundUpCommand(RoundUpCommand(args.roundup)))
 
-        if args.filter is not None:
-            lambd = command_map[args.filter]
+        if args.filter_id is not None:
+            lambd = command_map[args.filter_id]
             pipe.append_command(lambd())
 
         if args.exclude:
