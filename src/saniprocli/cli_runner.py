@@ -1,11 +1,11 @@
 import logging
 import sys
 import time
-from collections.abc import Set
 
 from sanipro.abc import MutablePrompt, TokenInterface
 from sanipro.diff import PromptDifferenceDetector
 from sanipro.pipeline import PromptPipeline
+from sanipro.promptset import SetCalculatorWrapper
 
 from saniprocli import cli_hooks, color
 from saniprocli.abc import InputStrategy, RunnerInterface
@@ -13,71 +13,6 @@ from saniprocli.abc import InputStrategy, RunnerInterface
 logger_root = logging.getLogger()
 
 logger = logging.getLogger(__name__)
-
-
-def show_cli_stat(detector: PromptDifferenceDetector) -> None:
-    items = [
-        f"before -> {detector.before_num}",
-        f"after -> {detector.after_num}",
-        f"reduced -> {detector.reduced_num}",
-    ]
-
-    if detector.duplicated:
-        del_string = ", ".join(detector.duplicated)
-        items.append(f"duplicated -> {del_string}")
-    else:
-        items.append("no duplicates detected")
-
-    for item in items:
-        logger.info(f"(statistics) {item}")
-
-
-class PromptCalculable:
-    def do_math(
-        self, a: Set[TokenInterface], b: Set[TokenInterface]
-    ) -> Set[TokenInterface]:
-        raise NotImplementedError
-
-
-class CalculateMultipleInput:
-    def __init__(
-        self, calcurator: PromptCalculable, main: MutablePrompt, sub: MutablePrompt
-    ) -> None:
-        self._main = set(main)
-        self._sub = set(sub)
-        self._calcurator: PromptCalculable = calcurator
-
-    def execute(self):
-        result = self._calcurator.do_math(self._main, self._sub)
-        return result
-
-
-class UnionCalculator(PromptCalculable):
-    def do_math(
-        self, a: Set[TokenInterface], b: Set[TokenInterface]
-    ) -> Set[TokenInterface]:
-        return a | b
-
-
-class IntersectionCalculator(PromptCalculable):
-    def do_math(
-        self, a: Set[TokenInterface], b: Set[TokenInterface]
-    ) -> Set[TokenInterface]:
-        return a & b
-
-
-class SymmetricDifferenceCalculator(PromptCalculable):
-    def do_math(
-        self, a: Set[TokenInterface], b: Set[TokenInterface]
-    ) -> Set[TokenInterface]:
-        return a ^ b
-
-
-class DifferenceCalculator(PromptCalculable):
-    def do_math(
-        self, a: Set[TokenInterface], b: Set[TokenInterface]
-    ) -> Set[TokenInterface]:
-        return a - b
 
 
 class RunnerInteractive(RunnerInterface):
@@ -96,6 +31,7 @@ class RunnerInteractive(RunnerInterface):
         self.pipeline = pipeline
         self._token_cls = token_cls
         self.input_strategy = strategy
+        self._detector_cls = PromptDifferenceDetector
 
     def _run(self) -> None:
         raise NotImplementedError
@@ -115,31 +51,55 @@ class RunnerInteractive(RunnerInterface):
 
 
 class RunnerInteractiveMultiple(RunnerInteractive):
+    """TODO RunnerInterfaceに準拠させる"""
+
     def __init__(
         self,
         pipeline: PromptPipeline,
         token_cls: type[TokenInterface],
         strategy: InputStrategy,
-        calculator: PromptCalculable,
+        calculator: SetCalculatorWrapper,
     ) -> None:
         self._pipeline = pipeline
         self._token_cls = token_cls
         self._input_strategy = strategy
+
+        self._detector_cls = PromptDifferenceDetector
         self._calculator = calculator
-        logger.debug(calculator.__class__.__name__)
+
+    def _show_cli_stat(self, before: MutablePrompt, after: MutablePrompt) -> None:
+        detector = self._detector_cls(before, after)
+        items = [
+            f"before -> {detector.before_num}",
+            f"after -> {detector.after_num}",
+            f"reduced -> {detector.reduced_num}",
+        ]
+
+        if detector.duplicated:
+            del_string = ", ".join(detector.duplicated)
+            items.append(f"duplicated -> {del_string}")
+        else:
+            items.append("no duplicates detected")
+
+        for item in items:
+            logger.info(f"(statistics) {item}")
 
     def _execute(self, first: str, second: str) -> str:
-        _first = self._pipeline.parse(first, self._token_cls, auto_apply=False)
-        _second = self._pipeline.parse(second, self._token_cls, auto_apply=False)
+        prompt_first = self._pipeline.parse(first, self._token_cls)
+        prompt_second = self._pipeline.parse(second, self._token_cls)
 
-        cal = CalculateMultipleInput(self._calculator, _first, _second)
-
-        tokens = [
-            str(self._token_cls(name=x.name, weight=x.weight)) for x in cal.execute()
+        tokens_raw = [
+            self._token_cls(name=x.name, weight=x.weight)
+            for x in self._calculator.do_math(prompt_first, prompt_second)
         ]
-        result = self._pipeline.delimiter.sep_output.join(tokens)
 
-        return result
+        selialized = [str(token) for token in tokens_raw]
+
+        self._show_cli_stat(prompt_first, tokens_raw)
+        self._show_cli_stat(prompt_second, tokens_raw)
+
+        selialized = self._pipeline.delimiter.sep_output.join(selialized)
+        return selialized
 
     def _handle_input(self) -> str:
         while True:
@@ -165,7 +125,6 @@ class RunnerInteractiveMultiple(RunnerInteractive):
                 _color = color.color_foreground
 
                 while True:
-                    logger.debug(f"{state=}")
                     if state == 00:
                         try:
                             first = self._handle_input()
@@ -204,14 +163,34 @@ class RunnerInteractiveSingle(RunnerInteractive):
         self._token_cls = token_cls
         self.input_strategy = strategy
 
+        self._detector_cls = PromptDifferenceDetector
+
+    def _show_cli_stat(self, before: MutablePrompt, after: MutablePrompt) -> None:
+        """Explains what has changed in the unprocessed/processsed prompts"""
+        detector = self._detector_cls(before, after)
+        items = [
+            f"before -> {detector.before_num}",
+            f"after -> {detector.after_num}",
+            f"reduced -> {detector.reduced_num}",
+        ]
+
+        if detector.duplicated:
+            del_string = ", ".join(detector.duplicated)
+            items.append(f"duplicated -> {del_string}")
+        else:
+            items.append("no duplicates detected")
+
+        for item in items:
+            logger.info(f"(statistics) {item}")
+
     def _execute(self, source: str) -> str:
-        tokens_unparsed = self.pipeline.parse(source, self._token_cls, auto_apply=True)
-        tokens = str(self.pipeline)
+        unparsed = self.pipeline.parse(source, self._token_cls, auto_apply=True)
+        parsed = self.pipeline.tokens
 
-        detector = PromptDifferenceDetector(tokens_unparsed, self.pipeline.tokens)
-        show_cli_stat(detector)
+        self._show_cli_stat(unparsed, parsed)
 
-        return tokens
+        selialized = str(self.pipeline)
+        return selialized
 
     def _run(self) -> None:
         self._write = sys.stdout.write

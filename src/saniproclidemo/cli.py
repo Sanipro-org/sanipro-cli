@@ -39,17 +39,14 @@ from sanipro.filters.utils import (
 )
 from sanipro.modules import create_pipeline
 from sanipro.parser import TokenInteractive, TokenNonInteractive
+from sanipro.promptset import SetCalculatorWrapper
 
 from saniprocli import cli_hooks, inputs
 from saniprocli.abc import InputStrategy, RunnerInterface
 from saniprocli.cli_runner import (
-    DifferenceCalculator,
-    IntersectionCalculator,
     RunnerInteractiveMultiple,
     RunnerInteractiveSingle,
     RunnerNonInteractiveSingle,
-    SymmetricDifferenceCalculator,
-    UnionCalculator,
 )
 from saniprocli.color import style
 from saniprocli.commands import CliArgsNamespaceDefault, CliCommands
@@ -517,17 +514,6 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
             ),
         )
 
-        parser.add_argument(
-            "--use-parser-v2",
-            "-2",
-            action="store_true",
-            help=(
-                "Switch to use another version of the parser instead. "
-                "This might be inferrior to the default parser "
-                "as it only parses the prompt and does nothing at all."
-            ),
-        )
-
     def _add_subparser_filter(self, parser: argparse.ArgumentParser) -> None:
         subparser = parser.add_subparsers(
             title="filter",
@@ -566,8 +552,13 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
             "diff", help=("Calculate the set difference between the prompts.")
         )
 
+    def _add_subparser_parser_v2(self, parser: argparse.ArgumentParser) -> None:
+        pass
+
     def _do_append_subparser(self, parser: argparse.ArgumentParser) -> None:
-        subparser = parser.add_subparsers(title="operations", dest="operation_id")
+        subparser = parser.add_subparsers(
+            title="operations", dest="operation_id", required=False
+        )
 
         parser_filter = subparser.add_parser(
             name="filter",
@@ -583,8 +574,19 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
             help=("Applies a set operation to the two prompts."),
         )
 
+        parser_use_v2 = subparser.add_parser(
+            name="parserv2",
+            formatter_class=SaniproHelpFormatter,
+            help=("Switch to use another version of the parser instead."),
+            description=(
+                "Switch to use another version of the parser instead. "
+                "It only parses the prompt and does nothing at all."
+            ),
+        )
+
         self._add_subparser_filter(parser_filter)
         self._add_subparser_set_operation(parser_set_operation)
+        self._add_subparser_parser_v2(parser_use_v2)
 
 
 class CliCommandsDemo(CliCommands):
@@ -599,36 +601,35 @@ class CliCommandsDemo(CliCommands):
         )
 
     def _get_runner(self) -> RunnerInterface:
+        """TODO"""
         pipe = self.get_pipeline()
         strategy = self._get_strategy()
         args = self._args
+        runner_default = RunnerNonInteractiveSingle
 
         if args.interactive:
+            runner_default = RunnerInteractiveSingle
+
             if args.operation_id == "filter":
                 return RunnerInteractiveSingle(pipe, TokenInteractive, strategy)
             elif args.operation_id == "set-operation":
                 if args.set_op_id is None:
                     raise Exception("set operation id is not set")
-
-                calculators = {
-                    "union": UnionCalculator,
-                    "diff": DifferenceCalculator,
-                    "intersection": IntersectionCalculator,
-                    "xor": SymmetricDifferenceCalculator,
-                }
                 try:
-                    calculator_cls = calculators[args.set_op_id]
-                    calculator_inst = calculator_cls()
                     return RunnerInteractiveMultiple(
-                        pipe, TokenInteractive, strategy, calculator_inst
+                        pipe,
+                        TokenInteractive,
+                        strategy,
+                        SetCalculatorWrapper.create_from(args.set_op_id),
                     )
                 except KeyError:
                     # TODO
                     raise
+
+            logger.info("No option was specified. Switching the default -> 'filter'.")
+            return runner_default(pipe, TokenInteractive, strategy)
         else:
             return RunnerNonInteractiveSingle(pipe, TokenNonInteractive, strategy)
-
-        raise Exception("any runner module not found")
 
     def to_runner(self) -> RunnerInterface:
         """The factory method for Runner class.
@@ -657,22 +658,8 @@ class CliCommandsDemo(CliCommands):
             lambda: CliUniqueCommand(UniqueCommand(args.reverse)),
         )
         command_map = dict(zip(command_ids, command_funcs, strict=True))
-
-        if args.use_parser_v2:
-            if args.filter_id in command_ids:
-                raise NotImplementedError(
-                    f"the '{args.filter_id}' command is not available "
-                    "when using parse_v2."
-                )
-
-            logger.warning("using parser_v2.")
-
         delimiter = pipeline.Delimiter(args.input_delimiter, args.output_delimiter)
-        pipe = (
-            create_pipeline(delimiter, pipeline.PromptPipelineV2)
-            if args.use_parser_v2
-            else create_pipeline(delimiter, pipeline.PromptPipelineV1)
-        )
+        pipe = create_pipeline(delimiter, pipeline.PromptPipelineV1)
 
         # always round
         pipe.append_command(CliRoundUpCommand(RoundUpCommand(args.roundup)))
