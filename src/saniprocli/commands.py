@@ -8,7 +8,7 @@ from sanipro.pipeline import PromptPipeline
 from sanipro.utils import HasPrettyRepr
 
 from saniprocli import inputs
-from saniprocli.abc import CliArgsNamespace, PipelineGettable, RunnerInterface
+from saniprocli.abc import CliArgsNamespace, CliRunnable, PipelineGettable
 from saniprocli.cli_runner import RunnerInteractiveSingle, RunnerNonInteractiveSingle
 
 from .help_formatter import SaniproHelpFormatter
@@ -142,7 +142,7 @@ class CliCommands(PipelineGettable):
         except ValueError:
             raise ValueError("the maximum two -v flags can only be added")
 
-    def to_runner(self) -> RunnerInterface:
+    def to_runner(self) -> CliRunnable:
         """The factory method for Runner class.
         Instantiated instance will be switched by the command option."""
 

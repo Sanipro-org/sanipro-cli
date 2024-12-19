@@ -42,7 +42,7 @@ from sanipro.parser import TokenInteractive, TokenNonInteractive
 from sanipro.promptset import SetCalculatorWrapper
 
 from saniprocli import cli_hooks, inputs
-from saniprocli.abc import InputStrategy, RunnerInterface
+from saniprocli.abc import CliRunnable, InputStrategy
 from saniprocli.cli_runner import (
     RunnerInteractiveMultiple,
     RunnerInteractiveSingle,
@@ -600,7 +600,7 @@ class CliCommandsDemo(CliCommands):
             else inputs.MultipleInputStrategy(self._args.ps1, self._args.ps2)
         )
 
-    def _get_runner(self) -> RunnerInterface:
+    def _get_runner(self) -> CliRunnable:
         """TODO"""
         pipe = self.get_pipeline()
         strategy = self._get_strategy()
@@ -631,7 +631,7 @@ class CliCommandsDemo(CliCommands):
         else:
             return RunnerNonInteractiveSingle(pipe, TokenNonInteractive, strategy)
 
-    def to_runner(self) -> RunnerInterface:
+    def to_runner(self) -> CliRunnable:
         """The factory method for Runner class.
         Instantiated instance will be switched by the command option."""
 

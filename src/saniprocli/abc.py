@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 
 from sanipro.abc import MutablePrompt, Prompt, PromptPipelineInterface, TokenInterface
 from sanipro.pipeline import PromptPipeline
+from sanipro.promptset import SetCalculatorWrapper
 
 
 class InputStrategy(ABC):
@@ -15,9 +16,24 @@ class InputStrategy(ABC):
         ...
 
 
-class RunnerInterface(ABC):
+class CliRunnable(ABC):
     """Represents common interface for the program to interact
     with the users."""
+
+    @abstractmethod
+    def run(self): ...
+
+
+class CliRunnableInnerRun(ABC):
+    """Contains while loop"""
+
+    @abstractmethod
+    def _start_loop(self) -> None: ...
+
+
+class CliSingular(ABC):
+    """Defines the basic interface for the class
+    that represents the action for single input."""
 
     @abstractmethod
     def __init__(
@@ -27,8 +43,19 @@ class RunnerInterface(ABC):
         strategy: InputStrategy,
     ) -> None: ...
 
+
+class CliPlural(ABC):
+    """Defines the basic interface for the class that
+    represents the action for dual input."""
+
     @abstractmethod
-    def run(self): ...
+    def __init__(
+        self,
+        pipeline: PromptPipelineInterface,
+        prpt: type[TokenInterface],
+        strategy: InputStrategy,
+        calculator: SetCalculatorWrapper,
+    ) -> None: ...
 
 
 class CommandExecutable(ABC):
