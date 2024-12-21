@@ -1,6 +1,7 @@
 import logging
 import sys
 import time
+from abc import ABC, abstractmethod
 
 from sanipro.abc import MutablePrompt, TokenInterface
 from sanipro.diff import PromptDifferenceDetector
@@ -9,8 +10,10 @@ from sanipro.promptset import SetCalculatorWrapper
 
 from saniprocli import cli_hooks, color
 from saniprocli.abc import (
+    CliPlural,
     CliRunnable,
     CliRunnableInnerRun,
+    CliSingular,
     InputStrategy,
 )
 
@@ -19,18 +22,24 @@ logger_root = logging.getLogger()
 logger = logging.getLogger(__name__)
 
 
-class RunnerInteractive(CliRunnable, CliRunnableInnerRun):
+class RunnerInteractive(CliRunnable, CliRunnableInnerRun, ABC):
     """Represents the method for the program to interact
     with the users.
 
     This runner is used when the user decided to use
     the interactive mode. This is similar what Python interpreter does like."""
 
-    def _start_loop(self) -> None:
-        raise NotImplementedError
+    @abstractmethod
+    def _start_loop(self) -> None: ...
+
+    @abstractmethod
+    def _show_cli_stat(self, before: MutablePrompt, after: MutablePrompt) -> None:
+        """Explains what has changed in the unprocessed/processsed prompts."""
 
     def _try_banner(self) -> None:
-        """TODO implement an option whether to show the banner or not"""
+        """Tries to show the banner if possible,
+
+        TODO implement an option whether to show the banner or not."""
         self._write(
             f"Sanipro (created by iigau) in interactive mode\n"
             f"Program was launched up at {time.asctime()}.\n"
@@ -43,7 +52,10 @@ class RunnerInteractive(CliRunnable, CliRunnableInnerRun):
         self._start_loop()
 
 
-class RunnerInteractiveSingle(RunnerInteractive):
+class RunnerInteractiveSingle(RunnerInteractive, CliSingular):
+    """Represents the runner with the interactive user interface
+    that expects a single input of the prompt."""
+
     def __init__(
         self,
         pipeline: PromptPipeline,
@@ -57,7 +69,6 @@ class RunnerInteractiveSingle(RunnerInteractive):
         self._detector_cls = PromptDifferenceDetector
 
     def _show_cli_stat(self, before: MutablePrompt, after: MutablePrompt) -> None:
-        """Explains what has changed in the unprocessed/processsed prompts"""
         detector = self._detector_cls(before, after)
         items = [
             f"before -> {detector.before_num}",
@@ -74,7 +85,7 @@ class RunnerInteractiveSingle(RunnerInteractive):
         for item in items:
             logger.info(f"(statistics) {item}")
 
-    def _execute(self, source: str) -> str:
+    def _execute_single(self, source: str) -> str:
         unparsed = self._pipeline.parse(source, self._token_cls, auto_apply=True)
         parsed = self._pipeline.tokens
 
@@ -91,7 +102,7 @@ class RunnerInteractiveSingle(RunnerInteractive):
                 try:
                     prompt_input = self._input_strategy.input()
                     if prompt_input:
-                        out = self._execute(prompt_input)
+                        out = self._execute_single(prompt_input)
                         self._write(f"{out}\n")
                 except EOFError as e:
                     break
@@ -102,8 +113,9 @@ class RunnerInteractiveSingle(RunnerInteractive):
         self._write(f"\n")
 
 
-class RunnerInteractiveMultiple(RunnerInteractive):
-    """TODO RunnerInterfaceに準拠させる"""
+class RunnerInteractiveMultiple(RunnerInteractive, CliPlural):
+    """Represents the runner with the interactive user interface
+    that expects two different prompts."""
 
     def __init__(
         self,
@@ -136,7 +148,7 @@ class RunnerInteractiveMultiple(RunnerInteractive):
         for item in items:
             logger.info(f"(statistics) {item}")
 
-    def _execute(self, first: str, second: str) -> str:
+    def _execute_multi(self, first: str, second: str) -> str:
         prompt_first = self._pipeline.parse(first, self._token_cls)
         prompt_second = self._pipeline.parse(second, self._token_cls)
 
@@ -195,7 +207,7 @@ class RunnerInteractiveMultiple(RunnerInteractive):
                             color.color_foreground = _color
                             continue
                     elif state == 20:
-                        out = self._execute(first, second)
+                        out = self._execute_multi(first, second)
                         self._write(f"{out}\n")
                         color.color_foreground = _color
                         break  # 次のプロンプトの組の入力へ
@@ -204,7 +216,7 @@ class RunnerInteractiveMultiple(RunnerInteractive):
         self._write(f"\n")
 
 
-class RunnerNonInteractiveSingle(CliRunnable):
+class RunnerNonInteractiveSingle(CliRunnable, CliSingular):
     """Represents the method for the program to interact
     with the users in non-interactive mode.
 
@@ -221,18 +233,21 @@ class RunnerNonInteractiveSingle(CliRunnable):
         self._token_cls = token_cls
         self._input_strategy = strategy
 
+    def _execute_single(self, source: str) -> str:
+        self._pipeline.parse(str(source), self._token_cls, auto_apply=True)
+        return str(self._pipeline)
+
     def _run_once(self) -> None:
-        sentence = None
+        self._write = print
+        sentence = ""
         try:
             sentence = self._input_strategy.input().strip()
         except (KeyboardInterrupt, EOFError):
             sys.stderr.write("\n")
             sys.exit(1)
         finally:
-            if sentence is not None:
-                self._pipeline.parse(str(sentence), self._token_cls, auto_apply=True)
-                result = str(self._pipeline)
-                print(result)
+            out = self._execute_single(sentence)
+            self._write(out)
 
     def run(self) -> None:
         self._run_once()
