@@ -7,6 +7,7 @@ from sanipro.abc import MutablePrompt, TokenInterface
 from sanipro.diff import PromptDifferenceDetector
 from sanipro.pipeline import PromptPipeline
 from sanipro.promptset import SetCalculatorWrapper
+
 from saniprocli import cli_hooks, color
 from saniprocli.abc import (
     CliPlural,

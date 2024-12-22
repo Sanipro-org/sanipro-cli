@@ -6,6 +6,7 @@ from sanipro.compatible import Self
 from sanipro.parser import TokenInteractive, TokenNonInteractive
 from sanipro.pipeline import PromptPipeline
 from sanipro.utils import HasPrettyRepr
+
 from saniprocli import inputs
 from saniprocli.abc import (
     CliRunnable,

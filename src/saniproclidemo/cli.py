@@ -9,10 +9,12 @@ import sys
 import typing
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from functools import partial
 from typing import NamedTuple
 
 from sanipro import pipeline
 from sanipro.abc import MutablePrompt, Prompt
+from sanipro.compatible import Self
 from sanipro.filters.abc import ExecutePrompt, ReordererStrategy
 from sanipro.filters.exclude import ExcludeCommand
 from sanipro.filters.fuzzysort import (
@@ -40,6 +42,7 @@ from sanipro.filters.utils import (
 from sanipro.modules import create_pipeline
 from sanipro.parser import TokenInteractive, TokenNonInteractive
 from sanipro.promptset import SetCalculatorWrapper
+
 from saniprocli import cli_hooks, inputs
 from saniprocli.abc import CliRunnable, InputStrategy
 from saniprocli.cli_runner import (
@@ -126,6 +129,9 @@ class CliCommand(ExecutePrompt, SubparserInjectable):
 class CliExcludeCommand(CliCommand):
     command_id: str = "exclude"
 
+    def __init__(self, excludes: Sequence[str]):
+        self.command = ExcludeCommand(excludes)
+
 
 class SimilarModuleMapper(ModuleMapper):
     NAIVE = CmdModuleTuple("naive", NaiveReorderer)
@@ -136,6 +142,9 @@ class SimilarModuleMapper(ModuleMapper):
 
 class CliSimilarCommand(CliCommand):
     command_id: str = "similar"
+
+    def __init__(self, reorderer: ReordererStrategy, *, reverse=False):
+        self.command = SimilarCommand(reorderer, reverse=reverse)
 
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
@@ -201,7 +210,7 @@ class CliSimilarCommand(CliCommand):
         )
 
     @classmethod
-    def query_strategy(
+    def _query_strategy(
         cls, method: str | None = None
     ) -> type[ReordererStrategy] | None:
         """Matches the methods specified on the command line
@@ -226,7 +235,7 @@ class CliSimilarCommand(CliCommand):
         def get_class(cmd: "CliArgsNamespaceDemo") -> type[ReordererStrategy] | None:
             query = cmd.similar_method
             if query != "mst":
-                return cls.query_strategy(method=query)
+                return cls._query_strategy(method=query)
             else:
                 adapters = [
                     [cmd.kruskal, SimilarModuleMapper.KRUSKAL],
@@ -251,15 +260,17 @@ class CliSimilarCommand(CliCommand):
         raise ValueError("failed to find reorder function.")
 
     @classmethod
-    def create_from_cmd(
-        cls, cmd: "CliArgsNamespaceDemo", *, reverse=False
-    ) -> SimilarCommand:
+    def create_from_cmd(cls, cmd: "CliArgsNamespaceDemo", *, reverse=False) -> Self:
         """Alternative method."""
-        return SimilarCommand(reorderer=cls.get_reorderer(cmd), reverse=reverse)
+
+        return cls(reorderer=cls.get_reorderer(cmd), reverse=reverse)
 
 
 class CliMaskCommand(CliCommand):
     command_id: str = "mask"
+
+    def __init__(self, excludes: Sequence[str], replace_to: str):
+        self.command = MaskCommand(excludes, replace_to)
 
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
@@ -290,6 +301,9 @@ class CliMaskCommand(CliCommand):
 class CliRandomCommand(CliCommand):
     command_id: str = "random"
 
+    def __init__(self, seed: int | None = None):
+        self.command = RandomCommand(seed)
+
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
         subcommand = subparser.add_parser(
@@ -310,6 +324,9 @@ class CliRandomCommand(CliCommand):
 
 class CliResetCommand(CliCommand):
     command_id: str = "reset"
+
+    def __init__(self, new_value: float | None = None) -> None:
+        self.command = ResetCommand(new_value)
 
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
@@ -332,9 +349,15 @@ class CliResetCommand(CliCommand):
 class CliRoundUpCommand(CliCommand):
     command_id: str = "roundup"
 
+    def __init__(self, digits: int):
+        self.command = RoundUpCommand(digits)
+
 
 class CliSortCommand(CliCommand):
     command_id: str = "sort"
+
+    def __init__(self, reverse: bool = False):
+        self.command = SortCommand(reverse)
 
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
@@ -360,6 +383,9 @@ class SortAllModuleMapper(ModuleMapper):
 
 class CliSortAllCommand(CliCommand):
     command_id: str = "sort-all"
+
+    def __init__(self, sorted_partial: partial, reverse: bool = False):
+        self.command = SortAllCommand(sorted_partial, reverse)
 
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
@@ -408,7 +434,7 @@ class CliSortAllCommand(CliCommand):
         )
 
     @classmethod
-    def query_strategy(cls, *, method: str | None = None) -> functools.partial:
+    def _query_strategy(cls, *, method: str | None = None) -> functools.partial:
         """
         method を具体的なクラスの名前にマッチングさせる。
 
@@ -428,17 +454,18 @@ class CliSortAllCommand(CliCommand):
             raise ValueError("method name is not found.")
 
     @classmethod
-    def create_from_cmd(
-        cls, cmd: "CliArgsNamespaceDemo", *, reverse=False
-    ) -> SortAllCommand:
+    def create_from_cmd(cls, cmd: "CliArgsNamespaceDemo", *, reverse=False) -> Self:
         """Alternative method."""
 
-        partial = cls.query_strategy(method=cmd.sort_all_method)
-        return SortAllCommand(partial, reverse=reverse)
+        partial = cls._query_strategy(method=cmd.sort_all_method)
+        return cls(partial, reverse=reverse)
 
 
 class CliUniqueCommand(CliCommand):
     command_id: str = "unique"
+
+    def __init__(self, reverse: bool = False):
+        self.command = UniqueCommand(reverse)
 
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
@@ -460,6 +487,16 @@ class CliUniqueCommand(CliCommand):
 class CliSubcommandFilter(SubparserInjectable):
     command_id: str = "filter"
 
+    filter_classes = (
+        CliMaskCommand,
+        CliRandomCommand,
+        CliResetCommand,
+        CliSimilarCommand,
+        CliSortAllCommand,
+        CliSortCommand,
+        CliUniqueCommand,
+    )
+
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
         parser = subparser.add_parser(
@@ -468,6 +505,19 @@ class CliSubcommandFilter(SubparserInjectable):
             description=("Applies a filter to the prompt."),
             help=("Applies a filter to the prompt."),
         )
+
+        subparser = parser.add_subparsers(
+            title="filter",
+            description=(
+                "List of available filters that can be applied to the prompt. "
+                "Just one filter can be applied at once."
+            ),
+            dest="filter_id",
+            metavar="FILTER",
+        )
+
+        for cmd in cls.filter_classes:
+            cmd.inject_subparser(subparser)
 
 
 class CliSubcommandSetOperation(SubparserInjectable):
@@ -491,35 +541,23 @@ class CliSubcommandSetOperation(SubparserInjectable):
         )
 
         subparser.add_parser(
-            "union",
-            help=(
-                "Calculates the set union. "
-                "This combines all tokens of two prompts into one."
-            ),
+            SetCalculatorWrapper.union,
+            help=("Combines all tokens of two prompts into one."),
         )
 
         subparser.add_parser(
-            "intersection",
-            help=(
-                "Calculates the set intersection. "
-                "This extracts only the tokens that appear in both prompts."
-            ),
+            SetCalculatorWrapper.intersection,
+            help=("Extracts only the tokens that are common to two prompts."),
         )
 
         subparser.add_parser(
-            "xor",
-            help=(
-                "Calculates the symmetric difference of the sets. "
-                "This collects only tokens that are in only one of the two prompts."
-            ),
+            SetCalculatorWrapper.difference,
+            help=("Excludes the tokens of the second prompt from the first one."),
         )
 
         subparser.add_parser(
-            "diff",
-            help=(
-                "Calculates the set subtraction. "
-                "This excludes the tokens of the second prompt from the first one."
-            ),
+            SetCalculatorWrapper.symmetric_difference,
+            help=("Collects only tokens that are in only one of the two prompts."),
         )
 
 
@@ -528,7 +566,6 @@ class CliSubcommandV2(SubparserInjectable):
 
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
-
         parser = subparser.add_parser(
             name=cls.command_id,
             formatter_class=SaniproHelpFormatter,
@@ -566,16 +603,6 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
     kruskal: bool
     prim: bool
 
-    command_classes = (
-        CliMaskCommand,
-        CliRandomCommand,
-        CliResetCommand,
-        CliSimilarCommand,
-        CliSortAllCommand,
-        CliSortCommand,
-        CliUniqueCommand,
-    )
-
     @classmethod
     def _do_append_parser(cls, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
@@ -599,28 +626,6 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
                 "Multiple options can be specified."
             ),
         )
-
-    @classmethod
-    def _add_subparser_filter(cls, parser: argparse.ArgumentParser) -> None:
-        subparser = parser.add_subparsers(
-            title="filter",
-            description=(
-                "List of available filters that can be applied to the prompt. "
-                "Just one filter can be applied at once."
-            ),
-            dest="filter_id",
-            metavar="FILTER",
-        )
-
-        for cmd in cls.command_classes:
-            cmd.inject_subparser(subparser)
-
-    @classmethod
-    def _add_subparser_set_operation(cls, parser: argparse.ArgumentParser) -> None: ...
-
-    @classmethod
-    def _add_subparser_parser_v2(cls, parser: argparse.ArgumentParser) -> None:
-        pass
 
     @classmethod
     def _do_append_subparser(cls, parser: argparse.ArgumentParser) -> None:
@@ -656,6 +661,7 @@ class CliCommandsDemo(CliCommands):
 
         TODO"""
         pipe = self.get_pipeline()
+
         strategy = self._get_strategy()
         args = self._args
         runner_default = RunnerNonInteractiveSingle
@@ -700,29 +706,33 @@ class CliCommandsDemo(CliCommands):
 
         args = self._args
 
-        command_ids = [cmd.command_id for cmd in args.command_classes]
+        command_ids = [cmd.command_id for cmd in CliSubcommandFilter.filter_classes]
         command_funcs = (
-            lambda: CliMaskCommand(MaskCommand(args.mask, args.replace_to)),
-            lambda: CliRandomCommand(RandomCommand(args.seed)),
-            lambda: CliResetCommand(ResetCommand(args.value)),
+            lambda: CliMaskCommand(args.mask, args.replace_to),
+            lambda: CliRandomCommand(args.seed),
+            lambda: CliResetCommand(args.value),
             lambda: CliSimilarCommand.create_from_cmd(cmd=args, reverse=args.reverse),
             lambda: CliSortAllCommand.create_from_cmd(cmd=args, reverse=args.reverse),
-            lambda: CliSortCommand(SortCommand(args.reverse)),
-            lambda: CliUniqueCommand(UniqueCommand(args.reverse)),
+            lambda: CliSortCommand(args.reverse),
+            lambda: CliUniqueCommand(args.reverse),
         )
         command_map = dict(zip(command_ids, command_funcs, strict=True))
         delimiter = pipeline.Delimiter(args.input_delimiter, args.output_delimiter)
         pipe = create_pipeline(delimiter, pipeline.PromptPipelineV1)
 
         # always round
-        pipe.append_command(CliRoundUpCommand(RoundUpCommand(args.roundup)))
+        pipe.append_command(CliRoundUpCommand(args.roundup))
 
         if args.filter_id is not None:
-            lambd = command_map[args.filter_id]
+            lambd = None
+            try:
+                lambd = command_map[args.filter_id]
+            except KeyError:
+                raise
             pipe.append_command(lambd())
 
         if args.exclude:
-            pipe.append_command(CliExcludeCommand(ExcludeCommand(args.exclude)))
+            pipe.append_command(CliExcludeCommand(args.exclude))
 
         return pipe
 
