@@ -13,7 +13,7 @@ from typing import NamedTuple
 
 from sanipro import pipeline
 from sanipro.abc import MutablePrompt, Prompt
-from sanipro.filters.abc import Command, ReordererStrategy
+from sanipro.filters.abc import ExecutePrompt, ReordererStrategy
 from sanipro.filters.exclude import ExcludeCommand
 from sanipro.filters.fuzzysort import (
     GreedyReorderer,
@@ -40,7 +40,6 @@ from sanipro.filters.utils import (
 from sanipro.modules import create_pipeline
 from sanipro.parser import TokenInteractive, TokenNonInteractive
 from sanipro.promptset import SetCalculatorWrapper
-
 from saniprocli import cli_hooks, inputs
 from saniprocli.abc import CliRunnable, InputStrategy
 from saniprocli.cli_runner import (
@@ -97,31 +96,34 @@ class ModuleMatcher:
         return result
 
 
-class CliCommandInterface(ABC):
-    @abstractmethod
-    def __init__(self, command: Command) -> None: ...
+class SubparserInjectable(ABC):
+    """The trait with the ability to inject a subparser."""
 
     @classmethod
     @abstractmethod
-    def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None: ...
+    def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
+        """Injects subparser."""
 
 
-class CliCommandBase(CliCommandInterface, Command):
+class CliCommand(ExecutePrompt, SubparserInjectable):
+    """The wrapper class for the filter commands
+    with the addition of subparser."""
+
     command_id: str
-    command: Command
+    command: ExecutePrompt
 
-    def __init__(self, command: Command) -> None:
+    def __init__(self, command: ExecutePrompt) -> None:
         self.command = command
 
-    def execute(self, prompt: Prompt) -> MutablePrompt:
-        return self.command.execute(prompt)
+    def execute_prompt(self, prompt: Prompt) -> MutablePrompt:
+        return self.command.execute_prompt(prompt)
 
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
-        pass
+        """Does nothing by default."""
 
 
-class CliExcludeCommand(CliCommandBase):
+class CliExcludeCommand(CliCommand):
     command_id: str = "exclude"
 
 
@@ -132,11 +134,11 @@ class SimilarModuleMapper(ModuleMapper):
     PRIM = CmdModuleTuple("prim", PrimMSTReorderer)
 
 
-class CliSimilarCommand(CliCommandBase):
+class CliSimilarCommand(CliCommand):
     command_id: str = "similar"
 
     @classmethod
-    def inject_subparser(cls, subparser: argparse._SubParsersAction):
+    def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
         subparser_similar = subparser.add_parser(
             cls.command_id,
             formatter_class=SaniproHelpFormatter,
@@ -256,11 +258,11 @@ class CliSimilarCommand(CliCommandBase):
         return SimilarCommand(reorderer=cls.get_reorderer(cmd), reverse=reverse)
 
 
-class CliMaskCommand(CliCommandBase):
+class CliMaskCommand(CliCommand):
     command_id: str = "mask"
 
     @classmethod
-    def inject_subparser(cls, subparser: argparse._SubParsersAction):
+    def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
         subcommand = subparser.add_parser(
             cls.command_id,
             help="Mask tokens with words.",
@@ -285,11 +287,11 @@ class CliMaskCommand(CliCommandBase):
         )
 
 
-class CliRandomCommand(CliCommandBase):
+class CliRandomCommand(CliCommand):
     command_id: str = "random"
 
     @classmethod
-    def inject_subparser(cls, subparser: argparse._SubParsersAction):
+    def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
         subcommand = subparser.add_parser(
             cls.command_id,
             formatter_class=SaniproHelpFormatter,
@@ -306,11 +308,11 @@ class CliRandomCommand(CliCommandBase):
         )
 
 
-class CliResetCommand(CliCommandBase):
+class CliResetCommand(CliCommand):
     command_id: str = "reset"
 
     @classmethod
-    def inject_subparser(cls, subparser: argparse._SubParsersAction):
+    def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
         subcommand = subparser.add_parser(
             cls.command_id,
             formatter_class=SaniproHelpFormatter,
@@ -327,15 +329,15 @@ class CliResetCommand(CliCommandBase):
         )
 
 
-class CliRoundUpCommand(CliCommandBase):
+class CliRoundUpCommand(CliCommand):
     command_id: str = "roundup"
 
 
-class CliSortCommand(CliCommandBase):
+class CliSortCommand(CliCommand):
     command_id: str = "sort"
 
     @classmethod
-    def inject_subparser(cls, subparser: argparse._SubParsersAction):
+    def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
         subcommand = subparser.add_parser(
             cls.command_id,
             formatter_class=SaniproHelpFormatter,
@@ -356,11 +358,11 @@ class SortAllModuleMapper(ModuleMapper):
     ORD_SUM = CmdModuleTuple("ord-sum", sort_by_ord_sum)
 
 
-class CliSortAllCommand(CliCommandBase):
+class CliSortAllCommand(CliCommand):
     command_id: str = "sort-all"
 
     @classmethod
-    def inject_subparser(cls, subparser: argparse._SubParsersAction):
+    def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
         parser = subparser.add_parser(
             cls.command_id,
             formatter_class=SaniproHelpFormatter,
@@ -435,11 +437,11 @@ class CliSortAllCommand(CliCommandBase):
         return SortAllCommand(partial, reverse=reverse)
 
 
-class CliUniqueCommand(CliCommandBase):
+class CliUniqueCommand(CliCommand):
     command_id: str = "unique"
 
     @classmethod
-    def inject_subparser(cls, subparser: argparse._SubParsersAction):
+    def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
         parser = subparser.add_parser(
             cls.command_id,
             formatter_class=SaniproHelpFormatter,
@@ -452,6 +454,89 @@ class CliUniqueCommand(CliCommandBase):
             "--reverse",
             action="store_true",
             help="Make the token with the heaviest weight survived.",
+        )
+
+
+class CliSubcommandFilter(SubparserInjectable):
+    command_id: str = "filter"
+
+    @classmethod
+    def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
+        parser = subparser.add_parser(
+            name=cls.command_id,
+            formatter_class=SaniproHelpFormatter,
+            description=("Applies a filter to the prompt."),
+            help=("Applies a filter to the prompt."),
+        )
+
+
+class CliSubcommandSetOperation(SubparserInjectable):
+    command_id: str = "set-operation"
+
+    @classmethod
+    def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
+        parser = subparser.add_parser(
+            name=cls.command_id,
+            formatter_class=SaniproHelpFormatter,
+            description=("Applies a set operation to the two prompts."),
+            help=("Applies a set operation to the two prompts."),
+        )
+
+        subparser = parser.add_subparsers(
+            title="set-operation",
+            description="Applies a set operation to the two prompts.",
+            help="List of available set operations to the two prompts.",
+            dest="set_op_id",
+            metavar="SET_OPERATION",
+        )
+
+        subparser.add_parser(
+            "union",
+            help=(
+                "Calculates the set union. "
+                "This combines all tokens of two prompts into one."
+            ),
+        )
+
+        subparser.add_parser(
+            "intersection",
+            help=(
+                "Calculates the set intersection. "
+                "This extracts only the tokens that appear in both prompts."
+            ),
+        )
+
+        subparser.add_parser(
+            "xor",
+            help=(
+                "Calculates the symmetric difference of the sets. "
+                "This collects only tokens that are in only one of the two prompts."
+            ),
+        )
+
+        subparser.add_parser(
+            "diff",
+            help=(
+                "Calculates the set subtraction. "
+                "This excludes the tokens of the second prompt from the first one."
+            ),
+        )
+
+
+class CliSubcommandV2(SubparserInjectable):
+    command_id: str = "parserv2"
+
+    @classmethod
+    def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
+
+        parser = subparser.add_parser(
+            name=cls.command_id,
+            formatter_class=SaniproHelpFormatter,
+            help=("Switch to use another version of the parser instead."),
+            description=(
+                "Switch to use another version of the parser instead. "
+                "It only parses the prompt and does nothing at all."
+            ),
         )
 
 
@@ -491,11 +576,12 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
         CliUniqueCommand,
     )
 
-    def _do_append_parser(self, parser: argparse.ArgumentParser) -> None:
+    @classmethod
+    def _do_append_parser(cls, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
             "-u",
             "--roundup",
-            default=self.roundup,
+            default=cls.roundup,
             type=int,
             help=(
                 "All the token with weights (x > 1.0 or x < 1.0) "
@@ -514,7 +600,8 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
             ),
         )
 
-    def _add_subparser_filter(self, parser: argparse.ArgumentParser) -> None:
+    @classmethod
+    def _add_subparser_filter(cls, parser: argparse.ArgumentParser) -> None:
         subparser = parser.add_subparsers(
             title="filter",
             description=(
@@ -525,68 +612,30 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
             metavar="FILTER",
         )
 
-        for cmd in self.command_classes:
+        for cmd in cls.command_classes:
             cmd.inject_subparser(subparser)
 
-    def _add_subparser_set_operation(self, parser: argparse.ArgumentParser) -> None:
-        subparser = parser.add_subparsers(
-            title="set-operation",
-            description="Applies a set operation to the two prompts.",
-            help="List of available set operations to the two prompts.",
-            dest="set_op_id",
-            metavar="SET_OPERATION",
-        )
+    @classmethod
+    def _add_subparser_set_operation(cls, parser: argparse.ArgumentParser) -> None: ...
 
-        subparser.add_parser("union", help=("Marge both prompts into one."))
-
-        subparser.add_parser(
-            "intersection",
-            help=("Extract only the same tokens that appear in both prompts."),
-        )
-
-        subparser.add_parser(
-            "xor", help=("Calculate the symmetrical difference between the prompts.")
-        )
-
-        subparser.add_parser(
-            "diff", help=("Calculate the set difference between the prompts.")
-        )
-
-    def _add_subparser_parser_v2(self, parser: argparse.ArgumentParser) -> None:
+    @classmethod
+    def _add_subparser_parser_v2(cls, parser: argparse.ArgumentParser) -> None:
         pass
 
-    def _do_append_subparser(self, parser: argparse.ArgumentParser) -> None:
+    @classmethod
+    def _do_append_subparser(cls, parser: argparse.ArgumentParser) -> None:
         subparser = parser.add_subparsers(
             title="operations", dest="operation_id", required=False
         )
 
-        parser_filter = subparser.add_parser(
-            name="filter",
-            formatter_class=SaniproHelpFormatter,
-            description=("Applies a filter to the prompt."),
-            help=("Applies a filter to the prompt."),
-        )
+        classes: list[type[SubparserInjectable]] = [
+            CliSubcommandFilter,
+            CliSubcommandSetOperation,
+            CliSubcommandV2,
+        ]
 
-        parser_set_operation = subparser.add_parser(
-            name="set-operation",
-            formatter_class=SaniproHelpFormatter,
-            description=("Applies a set operation to the two prompts."),
-            help=("Applies a set operation to the two prompts."),
-        )
-
-        parser_use_v2 = subparser.add_parser(
-            name="parserv2",
-            formatter_class=SaniproHelpFormatter,
-            help=("Switch to use another version of the parser instead."),
-            description=(
-                "Switch to use another version of the parser instead. "
-                "It only parses the prompt and does nothing at all."
-            ),
-        )
-
-        self._add_subparser_filter(parser_filter)
-        self._add_subparser_set_operation(parser_set_operation)
-        self._add_subparser_parser_v2(parser_use_v2)
+        for cmd in classes:
+            cmd.inject_subparser(subparser)
 
 
 class CliCommandsDemo(CliCommands):
@@ -601,7 +650,11 @@ class CliCommandsDemo(CliCommands):
         )
 
     def _get_runner(self) -> CliRunnable:
-        """TODO"""
+        """The factory method for Runner class.
+
+        Instantiated instance will be switched by the command option.
+
+        TODO"""
         pipe = self.get_pipeline()
         strategy = self._get_strategy()
         args = self._args
@@ -693,7 +746,7 @@ def prepare_readline() -> None:
 
 def app():
     try:
-        args = CliArgsNamespaceDemo().from_sys_argv(sys.argv[1:])
+        args = CliArgsNamespaceDemo.from_sys_argv(sys.argv[1:])
         cli_commands = CliCommandsDemo(args)
 
         cli_hooks.on_init.append(prepare_readline)

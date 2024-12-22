@@ -1,14 +1,18 @@
 import argparse
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
 
+from sanipro.compatible import Self
 from sanipro.parser import TokenInteractive, TokenNonInteractive
 from sanipro.pipeline import PromptPipeline
 from sanipro.utils import HasPrettyRepr
-
 from saniprocli import inputs
-from saniprocli.abc import CliArgsNamespace, CliRunnable, PipelineGettable
+from saniprocli.abc import (
+    CliRunnable,
+    ParserAppendable,
+    PipelineGettable,
+    SubParserAppendable,
+)
 from saniprocli.cli_runner import RunnerInteractiveSingle, RunnerNonInteractiveSingle
 
 from .help_formatter import SaniproHelpFormatter
@@ -19,33 +23,33 @@ logger_root = logging.getLogger()
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class CliArgsNamespaceDefault(HasPrettyRepr, CliArgsNamespace):
-    """Namespace for the argparser."""
+class CliArgsNamespaceDefault(HasPrettyRepr, ParserAppendable, SubParserAppendable):
+    """Default namespace for the argparser."""
 
-    input_delimiter: str = ","
-    interactive: bool = False
-    one_line: bool = False
-    output_delimiter: str = ", "
-    ps1: str = ">>> "
-    ps2: str = "... "
-    verbose: int = 0
+    input_delimiter: str
+    interactive: bool
+    one_line: bool
+    output_delimiter: str
+    ps1: str
+    ps2: str
+    verbose: int
 
-    def _append_parser(self, parser: argparse.ArgumentParser) -> None:
+    @classmethod
+    def _append_parser(cls, parser: argparse.ArgumentParser) -> None:
         """Add parser for functions included by default."""
 
         parser.add_argument(
             "-d",
             "--input-delimiter",
             type=str,
-            default=self.input_delimiter,
+            default=",",
             help=("Preferred delimiter string for the original prompts."),
         )
 
         parser.add_argument(
             "-i",
             "--interactive",
-            default=self.interactive,
+            default=False,
             action="store_true",
             help=(
                 "Provides the REPL interface to play with prompts. "
@@ -56,7 +60,7 @@ class CliArgsNamespaceDefault(HasPrettyRepr, CliArgsNamespace):
         parser.add_argument(
             "-l",
             "--one-line",
-            default=self.one_line,
+            default=False,
             action="store_true",
             help=("Whether to confirm the prompt input with a single line of input."),
         )
@@ -64,7 +68,7 @@ class CliArgsNamespaceDefault(HasPrettyRepr, CliArgsNamespace):
         parser.add_argument(
             "-s",
             "--output-delimiter",
-            default=self.output_delimiter,
+            default=", ",
             type=str,
             help=("Preferred delimiter string for the processed prompts."),
         )
@@ -72,7 +76,7 @@ class CliArgsNamespaceDefault(HasPrettyRepr, CliArgsNamespace):
         parser.add_argument(
             "-p",
             "--ps1",
-            default=self.ps1,
+            default=">>> ",
             type=str,
             help=(
                 "The custom string that is used to wait for the user input "
@@ -82,7 +86,7 @@ class CliArgsNamespaceDefault(HasPrettyRepr, CliArgsNamespace):
 
         parser.add_argument(
             "--ps2",
-            default=self.ps2,
+            default="... ",
             type=str,
             help=(
                 "The custom string that is used to wait for the next user "
@@ -93,6 +97,7 @@ class CliArgsNamespaceDefault(HasPrettyRepr, CliArgsNamespace):
         parser.add_argument(
             "-v",
             "--verbose",
+            default=0,
             action="count",
             help=(
                 "Switch to display the extra logs for nerds, "
@@ -100,18 +105,24 @@ class CliArgsNamespaceDefault(HasPrettyRepr, CliArgsNamespace):
                 "Adding more flags causes your terminal more messier."
             ),
         )
-        self._do_append_parser(parser)
+        cls._do_append_parser(parser)
 
-    def _do_append_parser(self, parser: argparse.ArgumentParser) -> None:
+    @classmethod
+    def _do_append_parser(cls, parser: argparse.ArgumentParser) -> None:
         raise NotImplementedError
 
-    def _append_subparser(self, parser: argparse.ArgumentParser) -> None:
-        self._do_append_subparser(parser)
+    @classmethod
+    def _append_subparser(cls, parser: argparse.ArgumentParser) -> None:
+        cls._do_append_subparser(parser)
 
-    def _do_append_subparser(self, parser: argparse.ArgumentParser) -> None:
+    @classmethod
+    def _do_append_subparser(cls, parser: argparse.ArgumentParser) -> None:
         raise NotImplementedError
 
-    def from_sys_argv(self, arg_val: Sequence[str]):
+    @classmethod
+    def from_sys_argv(cls, arg_val: Sequence[str]) -> Self:
+        """Add parsers, and parse the commandline argument with it."""
+
         parser = argparse.ArgumentParser(
             prog="sanipro",
             description=(
@@ -122,10 +133,10 @@ class CliArgsNamespaceDefault(HasPrettyRepr, CliArgsNamespace):
             epilog="Help for each filter is available, respectively.",
         )
 
-        self._append_parser(parser)
-        self._append_subparser(parser)
+        cls._append_parser(parser)
+        cls._append_subparser(parser)
 
-        args = parser.parse_args(arg_val, namespace=self)
+        args = parser.parse_args(arg_val, namespace=cls())
         return args
 
 
@@ -143,7 +154,8 @@ class CliCommands(PipelineGettable):
             raise ValueError("the maximum two -v flags can only be added")
 
     def to_runner(self) -> CliRunnable:
-        """The factory method for Runner class.
+        """The default factory method for Runner class.
+
         Instantiated instance will be switched by the command option."""
 
         pipe = self.get_pipeline()

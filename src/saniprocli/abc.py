@@ -1,7 +1,7 @@
 import argparse
 from abc import ABC, abstractmethod
 
-from sanipro.abc import MutablePrompt, Prompt, PromptPipelineInterface, TokenInterface
+from sanipro.abc import PromptPipelineInterface, TokenInterface
 from sanipro.pipeline import PromptPipeline
 from sanipro.promptset import SetCalculatorWrapper
 
@@ -81,34 +81,27 @@ class CliPlural(ABC):
         """
 
 
-class CommandExecutable(ABC):
-    """The excutable command must implement this."""
+class ParserAppendable(ABC):
+    """Traits that appends user-defined parser."""
 
+    @classmethod
     @abstractmethod
-    def execute(self, prompt: Prompt) -> MutablePrompt: ...
-
-
-class ParserAppendable:
-    @abstractmethod
-    def _append_parser(self, parser: argparse.ArgumentParser) -> None:
+    def _append_parser(cls, parser: argparse.ArgumentParser) -> None:
         """Appends user-defined parser."""
         ...
 
 
-class SubParserAppendable:
+class SubParserAppendable(ABC):
+    """Traits that appends user-defined subparser."""
+
+    @classmethod
     @abstractmethod
-    def _append_subparser(self, parser: argparse.ArgumentParser) -> None:
+    def _append_subparser(cls, parser: argparse.ArgumentParser) -> None:
         """Appends user-defined subparser."""
         ...
 
 
-class CliArgsNamespace(ParserAppendable, SubParserAppendable):
-    """Default namespace for command arguments."""
-
-    ...
-
-
-class PipelineGettable:
+class PipelineGettable(ABC):
     """Represents user-defined pipeline."""
 
     @abstractmethod
