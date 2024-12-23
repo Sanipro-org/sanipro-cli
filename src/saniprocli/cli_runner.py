@@ -8,6 +8,7 @@ import typing
 from abc import ABC, abstractmethod
 
 from sanipro.abc import MutablePrompt
+from sanipro.compatible import Self
 from sanipro.diff import PromptDifferenceDetector
 from sanipro.pipeline import PromptPipeline
 from sanipro.promptset import SetCalculatorWrapper
@@ -269,19 +270,42 @@ class RunnerSetOperation(RunnerInteractiveMultiple, StatShowable):
 class RunnerTagFind(RunnerInteractiveSingle):
     """Represents the runner specialized for the filtering mode."""
 
-    _csvfile: typing.TextIO
-
-    def __init__(self, csvfile: typing.TextIO, strategy: InputStrategy) -> None:
+    def __init__(self, tags_n_count: dict[str, str], strategy: InputStrategy) -> None:
         self._input_strategy = strategy
-        self._csvfile = csvfile
+        self.tags_n_count: dict[str, str] = tags_n_count
 
-        self.column_separator = ","
-        self.tags_n_count: dict[str, str] = {}
+    @classmethod
+    def create_from_csv(
+        cls,
+        text: typing.TextIO,
+        strategy: InputStrategy,
+        delim: str,
+        key_idx: int,
+        value_idx: int,
+    ) -> Self:
+        """Import the key-value storage from a comma-separated file.
+        The index starts from 1. This is because common traditional command-line
+        utilities assume the field index originates from 1."""
 
-        with self._csvfile as fp:
-            for line in map(lambda ln: ln.strip("\n"), fp.readlines()):
-                key, value = line.split(self.column_separator)
-                self.tags_n_count |= {key: value}
+        if key_idx == value_idx:
+            raise ValueError("impossible to specify the same field number")
+        if key_idx < 1 or value_idx < 1:
+            raise ValueError("field number must be 1 or more")
+        key_idx -= 1
+        value_idx -= 1
+
+        dict_: dict[str, str] = {}
+        with text as fp:
+            try:
+                for row in map(
+                    lambda line: line.split(delim),
+                    map(lambda ln: ln.strip("\n"), fp.readlines()),
+                ):
+                    dict_ |= {row[key_idx]: row[value_idx]}
+            except IndexError:
+                raise IndexError("failed to get the element of the row number")
+
+        return cls(dict_, strategy)
 
     def _create_histfile_at_dev_shm(self) -> str:
         with tempfile.NamedTemporaryFile(delete=False, dir="/dev/shm") as fp:

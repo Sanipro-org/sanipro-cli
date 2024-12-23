@@ -504,13 +504,34 @@ class CliSubcommandSearchTag(SubparserInjectable):
         parser.add_argument(
             "infile",
             type=argparse.FileType("r"),
-            # description=("Specifies the text file comprised from two columns, "
-            #              "each separated with delimiter."),
             help=(
                 "Specifies the text file comprised from two columns, "
                 "each separated with delimiter."
             ),
-            # dest="in_file",
+        )
+
+        parser.add_argument(
+            "-k",
+            "--key-field",
+            default=1,
+            type=int,
+            help="Select this field number's element as a key.",
+        )
+
+        parser.add_argument(
+            "-v",
+            "--value-field",
+            default=2,
+            type=int,
+            help="Select this field number's element as a value.",
+        )
+
+        parser.add_argument(
+            "-d",
+            "--delimiter",
+            default=",",
+            type=str,
+            help="Use this character as a field separator.",
         )
 
 
@@ -634,6 +655,9 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
 
     # for tfind subcommand
     infile: typing.TextIO
+    key_field: int
+    value_field: int
+    delimiter: str
 
     def is_parser_v2(self) -> bool:
         return self.operation_id == CliSubcommandParserV2.command_id
@@ -759,7 +783,13 @@ class CliCommandsDemo(CliCommands):
             calculator = SetCalculatorWrapper.create_from(self._args.set_op_id)
             return RunnerSetOperation(pipe, input_strategy, calculator)
         elif self._args.is_tfind():
-            return RunnerTagFind(self._args.infile, input_strategy)
+            return RunnerTagFind.create_from_csv(
+                text=self._args.infile,
+                strategy=input_strategy,
+                delim=self._args.delimiter,
+                key_idx=self._args.key_field,
+                value_idx=self._args.value_field,
+            )
         else:  # default
             return RunnerFilter(pipe, input_strategy)
 
