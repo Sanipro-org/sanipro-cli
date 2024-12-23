@@ -14,7 +14,7 @@ from saniprocli.abc import (
     PipelineGettable,
     SubParserAppendable,
 )
-from saniprocli.cli_runner import RunnerInteractiveSingle, RunnerNonInteractiveSingle
+from saniprocli.cli_runner import RunnerFilter, RunnerNonInteractiveSingle
 
 from .help_formatter import SaniproHelpFormatter
 from .logger import get_log_level_from
@@ -169,7 +169,7 @@ class CliCommands(PipelineGettable):
             else inputs.MultipleInputStrategy(ps1, ps2)
         )
         runner = (
-            RunnerInteractiveSingle(pipe, TokenInteractive, strategy)
+            RunnerFilter(pipe, TokenInteractive, strategy)
             if self._args.interactive
             else RunnerNonInteractiveSingle(pipe, TokenNonInteractive, strategy)
         )

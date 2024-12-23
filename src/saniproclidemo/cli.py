@@ -48,9 +48,10 @@ from sanipro.tokenizer import PromptTokenizer, PromptTokenizerV1, PromptTokenize
 from saniprocli import cli_hooks, inputs
 from saniprocli.abc import CliRunnable, InputStrategy
 from saniprocli.cli_runner import (
-    RunnerInteractiveMultiple,
-    RunnerInteractiveSingle,
+    RunnerFilter,
     RunnerNonInteractiveSingle,
+    RunnerSetOperation,
+    RunnerTagFind,
 )
 from saniprocli.color import style
 from saniprocli.commands import CliArgsNamespaceDefault, CliCommands
@@ -490,6 +491,35 @@ class CliUniqueCommand(CliCommand):
         )
 
 
+class CliSubcommandSearchTag(SubparserInjectable):
+    command_id: str = "tfind"
+
+    @classmethod
+    def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
+        parser = subparser.add_parser(
+            name=cls.command_id,
+            formatter_class=SaniproHelpFormatter,
+            help=("Outputs the number of posts corresponds the tag specified."),
+            description=(
+                "In this mode a user specifies a CSV file acting as a key-value storage. "
+                "The first which is the `key` column corresponds to the name of the tag, "
+                "so do second which is the `value` column to the count of the assigned tag."
+            ),
+        )
+
+        parser.add_argument(
+            "infile",
+            type=argparse.FileType("r"),
+            # description=("Specifies the text file comprised from two columns, "
+            #              "each separated with delimiter."),
+            help=(
+                "Specifies the text file comprised from two columns, "
+                "each separated with delimiter."
+            ),
+            # dest="in_file",
+        )
+
+
 class CliSubcommandFilter(SubparserInjectable):
     command_id: str = "filter"
 
@@ -608,11 +638,17 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
     kruskal: bool
     prim: bool
 
+    # for tfind subcommand
+    infile: typing.TextIO
+
     def is_parser_v2(self) -> bool:
         return self.operation_id == CliSubcommandParserV2.command_id
 
     def is_filter(self) -> bool:
         return self.operation_id == CliSubcommandFilter.command_id
+
+    def is_tfind(self) -> bool:
+        return self.operation_id == CliSubcommandSearchTag.command_id
 
     def is_set_operation(self) -> bool:
         return self.operation_id == CliSubcommandSetOperation.command_id
@@ -651,17 +687,36 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
             CliSubcommandFilter,
             CliSubcommandSetOperation,
             CliSubcommandParserV2,
+            CliSubcommandSearchTag,
         ]
 
         for cmd in classes:
             cmd.inject_subparser(subparser)
 
 
+def prepare_readline() -> None:
+    """Prepare readline for the interactive mode."""
+    histfile = os.path.join(os.path.expanduser("~"), ".sanipro_history")
+
+    try:
+        readline.read_history_file(histfile)
+        h_len = readline.get_current_history_length()
+    except FileNotFoundError:
+        open(histfile, "wb").close()
+        h_len = 0
+
+    def save(prev_h_len, histfile):
+        new_h_len = readline.get_current_history_length()
+        readline.append_history_file(new_h_len - prev_h_len, histfile)
+
+    atexit.register(save, h_len, histfile)
+
+
 class CliCommandsDemo(CliCommands):
     def __init__(self, args: CliArgsNamespaceDemo) -> None:
         self._args = args
 
-    def _get_strategy(self) -> InputStrategy:
+    def _get_input_strategy(self) -> InputStrategy:
         return (
             inputs.OnelineInputStrategy(self._args.ps1)
             if self._args.one_line
@@ -695,22 +750,42 @@ class CliCommandsDemo(CliCommands):
         return PromptPipelineV2 if self._args.is_parser_v2() else PromptPipelineV1
 
     def _initialize_runner(self, pipe: PromptPipeline) -> CliRunnable:
-        strategy = self._get_strategy()
+        input_strategy = self._get_input_strategy()
 
         if self._args.interactive:
             if self._args.is_filter():
-                return RunnerInteractiveSingle(pipe, strategy)
+
+                cli_hooks.on_init.append(prepare_readline)
+                cli_hooks.execute(cli_hooks.on_init)
+                return RunnerFilter(pipe, input_strategy)
             elif self._args.is_set_operation():
                 if self._args.set_op_id is None:
                     raise Exception("set operation id is not set")
-                return RunnerInteractiveMultiple(
+
+                cli_hooks.on_init.append(prepare_readline)
+                cli_hooks.execute(cli_hooks.on_init)
+                return RunnerSetOperation(
                     pipe,
-                    strategy,
+                    input_strategy,
                     SetCalculatorWrapper.create_from(self._args.set_op_id),
                 )
-            return RunnerInteractiveSingle(pipe, strategy)
+            elif self._args.is_tfind():
+                return RunnerTagFind(self._args.infile, input_strategy)
+
+            return RunnerFilter(pipe, input_strategy)
         else:
-            return RunnerNonInteractiveSingle(pipe, strategy)
+            return RunnerNonInteractiveSingle(pipe, input_strategy)
+
+    def _get_pipeline(self) -> PromptPipeline:
+        """This is a pipeline for the purpose of showcasing.
+        Since all the parameters of each command is variable, the command
+        sacrifices the composability.
+        It is good for you to create your own pipeline, and name it
+        so you can use it as a preset."""
+
+        tokenizer = self._initialize_tokenizer()
+        filterpipe = self._initialize_filter_pipeline()
+        return self._initialize_pipeline()(tokenizer, filterpipe)
 
     def _get_runner(self) -> CliRunnable:
         pipe = self._get_pipeline()
@@ -737,55 +812,11 @@ class CliCommandsDemo(CliCommands):
 
         return command_map
 
-    def _get_pipeline(self) -> PromptPipeline:
-        """This is a pipeline for the purpose of showcasing.
-        Since all the parameters of each command is variable, the command
-        sacrifices the composability.
-        It is good for you to create your own pipeline, and name it
-        so you can use it as a preset."""
-        ...
-        tokenizer = self._initialize_tokenizer()
-        filterpipe = self._initialize_filter_pipeline()
-        return self._initialize_pipeline()(tokenizer, filterpipe)
-
-
-class IHistoryManager(ABC):
-    """Uses the GNU readline to aid user input."""
-
-    @classmethod
-    def prepare_readline(cls) -> None:
-        """The common interface to prepare the readline module."""
-
-
-class ReadlineHistoryManager(IHistoryManager):
-    """Uses the GNU readline module for storing/recovering the user input.
-    It is probablly a normal usecase."""
-
-    @classmethod
-    def prepare_readline(cls) -> None:
-        histfile = os.path.join(os.path.expanduser("~"), ".sanipro_history")
-
-        try:
-            readline.read_history_file(histfile)
-            h_len = readline.get_current_history_length()
-        except FileNotFoundError:
-            open(histfile, "wb").close()
-            h_len = 0
-
-        def save(prev_h_len, histfile):
-            new_h_len = readline.get_current_history_length()
-            readline.append_history_file(new_h_len - prev_h_len, histfile)
-
-        atexit.register(save, h_len, histfile)
-
 
 def app():
     try:
         args = CliArgsNamespaceDemo.from_sys_argv(sys.argv[1:])
         cli_commands = CliCommandsDemo(args)
-
-        cli_hooks.on_init.append(ReadlineHistoryManager.prepare_readline)
-        cli_hooks.execute(cli_hooks.on_init)
 
         for key, val in args.__dict__.items():
             print(f"(settings) {key} = {val!r}")

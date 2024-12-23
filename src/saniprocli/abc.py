@@ -1,7 +1,7 @@
 import argparse
 from abc import ABC, abstractmethod
 
-from sanipro.abc import IPromptPipeline
+from sanipro.abc import IPromptPipeline, MutablePrompt
 from sanipro.pipeline import PromptPipeline
 from sanipro.promptset import SetCalculatorWrapper
 
@@ -13,7 +13,6 @@ class InputStrategy(ABC):
     @abstractmethod
     def input(self, prompt: str = "") -> str:
         """Get a user input."""
-        ...
 
 
 class CliRunnable(ABC):
@@ -36,6 +35,12 @@ class CliRunnableInnerRun(ABC):
         inside the loop."""
 
 
+class StatShowable(ABC):
+    @abstractmethod
+    def _show_cli_stat(self, before: MutablePrompt, after: MutablePrompt) -> None:
+        """Explains what has changed in the unprocessed/processsed prompts."""
+
+
 class CliSingular(ABC):
     """Defines the basic interface for the class
     that represents the action for single input."""
@@ -48,6 +53,7 @@ class CliSingular(ABC):
     @abstractmethod
     def _execute_single(self, source: str) -> str:
         """Process the input prompt, and returns the text to show it later.
+
         Another feature can be implements into this method. Showing statistics
         regarding the prompt, for example.
         """
@@ -82,7 +88,6 @@ class ParserAppendable(ABC):
     @abstractmethod
     def _append_parser(cls, parser: argparse.ArgumentParser) -> None:
         """Appends user-defined parser."""
-        ...
 
 
 class SubParserAppendable(ABC):
@@ -92,7 +97,6 @@ class SubParserAppendable(ABC):
     @abstractmethod
     def _append_subparser(cls, parser: argparse.ArgumentParser) -> None:
         """Appends user-defined subparser."""
-        ...
 
 
 class PipelineGettable(ABC):
@@ -101,11 +105,8 @@ class PipelineGettable(ABC):
     @abstractmethod
     def _get_pipeline(self) -> PromptPipeline:
         """Gets user-defined pipeline."""
-        ...
 
 
 class CommandsInterface(ABC):
     """Custom subcommand implementation by user must implement
     the method of these."""
-
-    ...
