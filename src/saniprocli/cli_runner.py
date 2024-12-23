@@ -270,9 +270,12 @@ class RunnerSetOperation(RunnerInteractiveMultiple, StatShowable):
 class RunnerTagFind(RunnerInteractiveSingle):
     """Represents the runner specialized for the filtering mode."""
 
-    def __init__(self, tags_n_count: dict[str, str], strategy: InputStrategy) -> None:
+    def __init__(
+        self, tags_n_count: dict[str, str], strategy: InputStrategy, tempdir: str
+    ) -> None:
         self._input_strategy = strategy
         self.tags_n_count: dict[str, str] = tags_n_count
+        self.tempdir = tempdir
 
     @classmethod
     def create_from_csv(
@@ -282,6 +285,7 @@ class RunnerTagFind(RunnerInteractiveSingle):
         delim: str,
         key_idx: int,
         value_idx: int,
+        tempdir: str,
     ) -> Self:
         """Import the key-value storage from a comma-separated file.
         The index starts from 1. This is because common traditional command-line
@@ -305,10 +309,10 @@ class RunnerTagFind(RunnerInteractiveSingle):
             except IndexError:
                 raise IndexError("failed to get the element of the row number")
 
-        return cls(dict_, strategy)
+        return cls(dict_, strategy, tempdir)
 
     def _create_histfile_at_dev_shm(self) -> str:
-        with tempfile.NamedTemporaryFile(delete=False, dir="/dev/shm") as fp:
+        with tempfile.NamedTemporaryFile(delete=False, dir=self.tempdir) as fp:
             histfile = fp.name
             for key in self.tags_n_count.keys():
                 fp.write(f"{key}\n".encode())

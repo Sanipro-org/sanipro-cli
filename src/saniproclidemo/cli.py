@@ -6,6 +6,7 @@ import os
 import pprint
 import readline
 import sys
+from tempfile import tempdir
 import typing
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
@@ -528,10 +529,23 @@ class CliSubcommandSearchTag(SubparserInjectable):
 
         parser.add_argument(
             "-d",
-            "--delimiter",
+            "--field-delimiter",
             default=",",
             type=str,
             help="Use this character as a field separator.",
+        )
+
+        parser.add_argument(
+            "-t",
+            "--tempdir",
+            default="/dev/shm",
+            type=str,
+            help=(
+                "Use this directory as a tempfile storage. Technically speaking, "
+                "the program creates a new text file by extracting the field "
+                "from a csv file, format and save them so the GNU Readline "
+                "can read the histfile on this directory."
+            ),
         )
 
 
@@ -657,7 +671,8 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
     infile: typing.TextIO
     key_field: int
     value_field: int
-    delimiter: str
+    field_delimiter: str
+    tempdir: str
 
     def is_parser_v2(self) -> bool:
         return self.operation_id == CliSubcommandParserV2.command_id
@@ -786,9 +801,10 @@ class CliCommandsDemo(CliCommands):
             return RunnerTagFind.create_from_csv(
                 text=self._args.infile,
                 strategy=input_strategy,
-                delim=self._args.delimiter,
+                delim=self._args.field_delimiter,
                 key_idx=self._args.key_field,
                 value_idx=self._args.value_field,
+                tempdir=self._args.tempdir
             )
         else:  # default
             return RunnerFilter(pipe, input_strategy)
