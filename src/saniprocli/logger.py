@@ -39,13 +39,7 @@ logger_fp = BufferingLoggerWriter(logger, logging.DEBUG)
 def get_log_level_from(count: int | None) -> int:
     """Map function that maps the number of options to log level."""
 
-    if count is None:
-        return logging.INFO
-    elif count == 0:
-        return logging.INFO
-    elif count == 1:
-        return logging.INFO
-    elif count == 2:
-        return logging.DEBUG
-    else:
-        raise ValueError
+    if count is not None:
+        if count > 1:
+            return logging.DEBUG
+    return logging.INFO

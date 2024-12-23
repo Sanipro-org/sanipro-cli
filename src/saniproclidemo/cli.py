@@ -91,7 +91,7 @@ class ModuleMatcher:
         self.commands = commands
 
     def match(self, method: str) -> typing.Any:
-        # Todo: typing.Any を利用しないいい方法はないか？
+        # TODO: better type hinting without using typing.Any.
         f = self.commands.list_commands()
         logger.debug(f"{method=}")
         pprint.pprint(f, logger_fp)
@@ -442,13 +442,7 @@ class CliSortAllCommand(CliCommand):
 
     @classmethod
     def _query_strategy(cls, *, method: str | None = None) -> functools.partial:
-        """
-        method を具体的なクラスの名前にマッチングさせる。
-
-        Argument:
-            method: コマンドラインで指定された方法.
-        """
-        # set default
+        """Matches `method` to the name of a concrete class."""
         default = SortAllModuleMapper.LEXICOGRAPHICAL.key
         if method is None:
             method = default
@@ -730,7 +724,6 @@ class CliCommandsDemo(CliCommands):
             PromptTokenizerV2 if self._args.is_parser_v2() else PromptTokenizerV1
         )
         delimiter = Delimiter(self._args.input_delimiter, self._args.output_delimiter)
-        logger.debug(delimiter)
         return tokenizer_cls(parser_cls, token_cls, delimiter)
 
     def _initialize_filter_pipeline(self) -> FilterExecutor:
@@ -750,31 +743,25 @@ class CliCommandsDemo(CliCommands):
         return PromptPipelineV2 if self._args.is_parser_v2() else PromptPipelineV1
 
     def _initialize_runner(self, pipe: PromptPipeline) -> CliRunnable:
+        """Returns a runner."""
         input_strategy = self._get_input_strategy()
 
-        if self._args.interactive:
-            if self._args.is_filter():
-
-                cli_hooks.on_init.append(prepare_readline)
-                cli_hooks.execute(cli_hooks.on_init)
-                return RunnerFilter(pipe, input_strategy)
-            elif self._args.is_set_operation():
-                if self._args.set_op_id is None:
-                    raise Exception("set operation id is not set")
-
-                cli_hooks.on_init.append(prepare_readline)
-                cli_hooks.execute(cli_hooks.on_init)
-                return RunnerSetOperation(
-                    pipe,
-                    input_strategy,
-                    SetCalculatorWrapper.create_from(self._args.set_op_id),
-                )
-            elif self._args.is_tfind():
-                return RunnerTagFind(self._args.infile, input_strategy)
-
-            return RunnerFilter(pipe, input_strategy)
-        else:
+        if not self._args.interactive:
             return RunnerNonInteractiveSingle(pipe, input_strategy)
+
+        if not self._args.is_tfind():
+            cli_hooks.on_init.append(prepare_readline)
+            cli_hooks.execute(cli_hooks.on_init)
+
+        if self._args.is_filter():
+            return RunnerFilter(pipe, input_strategy)
+        elif self._args.is_set_operation():
+            calculator = SetCalculatorWrapper.create_from(self._args.set_op_id)
+            return RunnerSetOperation(pipe, input_strategy, calculator)
+        elif self._args.is_tfind():
+            return RunnerTagFind(self._args.infile, input_strategy)
+        else:  # default
+            return RunnerFilter(pipe, input_strategy)
 
     def _get_pipeline(self) -> PromptPipeline:
         """This is a pipeline for the purpose of showcasing.
@@ -818,11 +805,11 @@ def app():
         args = CliArgsNamespaceDemo.from_sys_argv(sys.argv[1:])
         cli_commands = CliCommandsDemo(args)
 
-        for key, val in args.__dict__.items():
-            print(f"(settings) {key} = {val!r}")
-
         log_level = cli_commands.get_logger_level()
         logger_root.setLevel(log_level)
+
+        for key, val in args.__dict__.items():
+            logger.debug(f"(settings) {key} = {val!r}")
 
         runner = cli_commands.to_runner()
         runner.run()

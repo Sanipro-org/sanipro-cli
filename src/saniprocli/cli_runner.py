@@ -153,14 +153,14 @@ class RunnerInteractiveMultiple(RunnerInteractive, CliPlural):
                             if second:
                                 state = 20
                         except EOFError:
-                            state = 00  # stateを00に戻す
+                            state = 00  # reset state to 00
                             color.color_foreground = _color
                             continue
                     elif state == 20:
                         out = self._execute_multi(first, second)
                         self._write(f"{out}\n")
                         color.color_foreground = _color
-                        break  # 次のプロンプトの組の入力へ
+                        break  # go to next set of prompts
             except EOFError:
                 break
         self._write(f"\n")
@@ -257,12 +257,12 @@ class RunnerSetOperation(RunnerInteractiveMultiple, StatShowable):
             for x in self._calculator.do_math(prompt_first, prompt_second)
         ]
 
-        selialized = [str(token) for token in tokens_raw]
+        tokens = [str(token) for token in tokens_raw]
 
         self._show_cli_stat(prompt_first, tokens_raw)
         self._show_cli_stat(prompt_second, tokens_raw)
 
-        selialized = self._pipeline.delimiter.sep_output.join(selialized)
+        selialized = self._pipeline.delimiter.sep_output.join(tokens)
         return selialized
 
 
@@ -278,9 +278,6 @@ class RunnerTagFind(RunnerInteractiveSingle):
         self.column_separator = ","
         self.tags_n_count: dict[str, str] = {}
 
-        self._init()
-
-    def _init(self):
         with self._csvfile as fp:
             for line in map(lambda ln: ln.strip("\n"), fp.readlines()):
                 key, value = line.split(self.column_separator)
@@ -297,7 +294,7 @@ class RunnerTagFind(RunnerInteractiveSingle):
         try:
             readline.read_history_file(histfile)
         except FileNotFoundError:
-            pass
+            logger.exception(f"failed to read history file: {histfile}")
 
     def _start_loop(self) -> None:
         histfile = self._create_histfile_at_dev_shm()
