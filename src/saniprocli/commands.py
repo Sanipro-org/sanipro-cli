@@ -159,7 +159,7 @@ class CliCommands(PipelineGettable):
 
         Instantiated instance will be switched by the command option."""
 
-        pipe = self.get_pipeline()
+        pipe = self._get_pipeline()
         ps1 = self._args.ps1
         ps2 = self._args.ps2
 
@@ -176,5 +176,5 @@ class CliCommands(PipelineGettable):
 
         return runner
 
-    def get_pipeline(self) -> PromptPipeline:
+    def _get_pipeline(self) -> PromptPipeline:
         raise NotImplementedError

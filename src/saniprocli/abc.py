@@ -1,7 +1,7 @@
 import argparse
 from abc import ABC, abstractmethod
 
-from sanipro.abc import PromptPipelineInterface, TokenInterface
+from sanipro.abc import IPromptPipeline
 from sanipro.pipeline import PromptPipeline
 from sanipro.promptset import SetCalculatorWrapper
 
@@ -41,12 +41,7 @@ class CliSingular(ABC):
     that represents the action for single input."""
 
     @abstractmethod
-    def __init__(
-        self,
-        pipeline: PromptPipelineInterface,
-        prpt: type[TokenInterface],
-        strategy: InputStrategy,
-    ) -> None:
+    def __init__(self, pipeline: IPromptPipeline, strategy: InputStrategy) -> None:
         """Common constructor interface that handles the
         single input."""
 
@@ -65,8 +60,7 @@ class CliPlural(ABC):
     @abstractmethod
     def __init__(
         self,
-        pipeline: PromptPipelineInterface,
-        prpt: type[TokenInterface],
+        pipeline: IPromptPipeline,
         strategy: InputStrategy,
         calculator: SetCalculatorWrapper,
     ) -> None:
@@ -105,7 +99,7 @@ class PipelineGettable(ABC):
     """Represents user-defined pipeline."""
 
     @abstractmethod
-    def get_pipeline(self) -> PromptPipeline:
+    def _get_pipeline(self) -> PromptPipeline:
         """Gets user-defined pipeline."""
         ...
 

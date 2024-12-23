@@ -8,13 +8,14 @@ import readline
 import sys
 import typing
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from functools import partial
 from typing import NamedTuple
 
-from sanipro import pipeline
 from sanipro.abc import MutablePrompt, Prompt
 from sanipro.compatible import Self
+from sanipro.delimiter import Delimiter
+from sanipro.filter_exec import FilterExecutor
 from sanipro.filters.abc import ExecutePrompt, ReordererStrategy
 from sanipro.filters.exclude import ExcludeCommand
 from sanipro.filters.fuzzysort import (
@@ -39,9 +40,10 @@ from sanipro.filters.utils import (
     sort_by_weight,
     sort_lexicographically,
 )
-from sanipro.modules import create_pipeline
-from sanipro.parser import TokenInteractive, TokenNonInteractive
+from sanipro.parser import ParserV1, ParserV2, TokenInteractive, TokenNonInteractive
+from sanipro.pipeline import PromptPipeline, PromptPipelineV1, PromptPipelineV2
 from sanipro.promptset import SetCalculatorWrapper
+from sanipro.tokenizer import PromptTokenizer, PromptTokenizerV1, PromptTokenizerV2
 
 from saniprocli import cli_hooks, inputs
 from saniprocli.abc import CliRunnable, InputStrategy
@@ -130,7 +132,7 @@ class CliExcludeCommand(CliCommand):
     command_id: str = "exclude"
 
     def __init__(self, excludes: Sequence[str]):
-        self.command = ExcludeCommand(excludes)
+        super().__init__(ExcludeCommand(excludes))
 
 
 class SimilarModuleMapper(ModuleMapper):
@@ -144,7 +146,7 @@ class CliSimilarCommand(CliCommand):
     command_id: str = "similar"
 
     def __init__(self, reorderer: ReordererStrategy, *, reverse=False):
-        self.command = SimilarCommand(reorderer, reverse=reverse)
+        super().__init__(SimilarCommand(reorderer, reverse=reverse))
 
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
@@ -171,6 +173,10 @@ class CliSimilarCommand(CliCommand):
             metavar="METHOD",
         )
 
+        cls._add_subcommands(subcommand)
+
+    @classmethod
+    def _add_subcommands(cls, subcommand: argparse._SubParsersAction) -> None:
         subcommand.add_parser(
             SimilarModuleMapper.NAIVE.key,
             formatter_class=SaniproHelpFormatter,
@@ -533,7 +539,7 @@ class CliSubcommandSetOperation(SubparserInjectable):
         )
 
         subparser = parser.add_subparsers(
-            title="set-operation",
+            title=cls.command_id,
             description="Applies a set operation to the two prompts.",
             help="List of available set operations to the two prompts.",
             dest="set_op_id",
@@ -561,7 +567,7 @@ class CliSubcommandSetOperation(SubparserInjectable):
         )
 
 
-class CliSubcommandV2(SubparserInjectable):
+class CliSubcommandParserV2(SubparserInjectable):
     command_id: str = "parserv2"
 
     @classmethod
@@ -585,7 +591,6 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
     roundup = 2
     replace_to: str
     mask: Sequence[str]
-    use_parser_v2: bool
 
     # 'dest' name for general operations
     operation_id = str  # may be 'filter', 'set_op', and more
@@ -602,6 +607,15 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
     sort_all_method: str
     kruskal: bool
     prim: bool
+
+    def is_parser_v2(self) -> bool:
+        return self.operation_id == CliSubcommandParserV2.command_id
+
+    def is_filter(self) -> bool:
+        return self.operation_id == CliSubcommandFilter.command_id
+
+    def is_set_operation(self) -> bool:
+        return self.operation_id == CliSubcommandSetOperation.command_id
 
     @classmethod
     def _do_append_parser(cls, parser: argparse.ArgumentParser) -> None:
@@ -636,7 +650,7 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
         classes: list[type[SubparserInjectable]] = [
             CliSubcommandFilter,
             CliSubcommandSetOperation,
-            CliSubcommandV2,
+            CliSubcommandParserV2,
         ]
 
         for cmd in classes:
@@ -654,56 +668,59 @@ class CliCommandsDemo(CliCommands):
             else inputs.MultipleInputStrategy(self._args.ps1, self._args.ps2)
         )
 
-    def _get_runner(self) -> CliRunnable:
-        """The factory method for Runner class.
+    def _initialize_tokenizer(self) -> PromptTokenizer:
+        token_cls = TokenInteractive if self._args.interactive else TokenNonInteractive
+        parser_cls = ParserV2 if self._args.is_parser_v2() else ParserV1
+        tokenizer_cls = (
+            PromptTokenizerV2 if self._args.is_parser_v2() else PromptTokenizerV1
+        )
+        delimiter = Delimiter(self._args.input_delimiter, self._args.output_delimiter)
+        logger.debug(delimiter)
+        return tokenizer_cls(parser_cls, token_cls, delimiter)
 
-        Instantiated instance will be switched by the command option.
+    def _initialize_filter_pipeline(self) -> FilterExecutor:
+        filterpipe = FilterExecutor()
+        filterpipe.append_command(CliRoundUpCommand(self._args.roundup))
 
-        TODO"""
-        pipe = self.get_pipeline()
+        if self._args.filter_id is not None:
+            command_map = self._command_map()
+            filterpipe.append_command(command_map[self._args.filter_id]())
 
+        if self._args.exclude:
+            filterpipe.append_command(CliExcludeCommand(self._args.exclude))
+
+        return filterpipe
+
+    def _initialize_pipeline(self) -> type[PromptPipeline]:
+        return PromptPipelineV2 if self._args.is_parser_v2() else PromptPipelineV1
+
+    def _initialize_runner(self, pipe: PromptPipeline) -> CliRunnable:
         strategy = self._get_strategy()
-        args = self._args
-        runner_default = RunnerNonInteractiveSingle
 
-        if args.interactive:
-            runner_default = RunnerInteractiveSingle
-
-            if args.operation_id == "filter":
-                return RunnerInteractiveSingle(pipe, TokenInteractive, strategy)
-            elif args.operation_id == "set-operation":
-                if args.set_op_id is None:
+        if self._args.interactive:
+            if self._args.is_filter():
+                return RunnerInteractiveSingle(pipe, strategy)
+            elif self._args.is_set_operation():
+                if self._args.set_op_id is None:
                     raise Exception("set operation id is not set")
-                try:
-                    return RunnerInteractiveMultiple(
-                        pipe,
-                        TokenInteractive,
-                        strategy,
-                        SetCalculatorWrapper.create_from(args.set_op_id),
-                    )
-                except KeyError:
-                    # TODO
-                    raise
-
-            logger.info("No option was specified. Switching the default -> 'filter'.")
-            return runner_default(pipe, TokenInteractive, strategy)
+                return RunnerInteractiveMultiple(
+                    pipe,
+                    strategy,
+                    SetCalculatorWrapper.create_from(self._args.set_op_id),
+                )
+            return RunnerInteractiveSingle(pipe, strategy)
         else:
-            return RunnerNonInteractiveSingle(pipe, TokenNonInteractive, strategy)
+            return RunnerNonInteractiveSingle(pipe, strategy)
 
-    def to_runner(self) -> CliRunnable:
-        """The factory method for Runner class.
-        Instantiated instance will be switched by the command option."""
-
-        runner = self._get_runner()
+    def _get_runner(self) -> CliRunnable:
+        pipe = self._get_pipeline()
+        runner = self._initialize_runner(pipe)
         return runner
 
-    def get_pipeline(self) -> pipeline.PromptPipeline:
-        """This is a pipeline for the purpose of showcasing.
-        Since all the parameters of each command is variable, the command
-        sacrifies the composability.
-        It is good for you to create your own pipeline, and name it
-        so you can use it as a preset."""
+    def to_runner(self) -> CliRunnable:
+        return self._get_runner()
 
+    def _command_map(self) -> dict[str, Callable]:
         args = self._args
 
         command_ids = [cmd.command_id for cmd in CliSubcommandFilter.filter_classes]
@@ -717,41 +734,49 @@ class CliCommandsDemo(CliCommands):
             lambda: CliUniqueCommand(args.reverse),
         )
         command_map = dict(zip(command_ids, command_funcs, strict=True))
-        delimiter = pipeline.Delimiter(args.input_delimiter, args.output_delimiter)
-        pipe = create_pipeline(delimiter, pipeline.PromptPipelineV1)
 
-        # always round
-        pipe.append_command(CliRoundUpCommand(args.roundup))
+        return command_map
 
-        if args.filter_id is not None:
-            lambd = None
-            try:
-                lambd = command_map[args.filter_id]
-            except KeyError:
-                raise
-            pipe.append_command(lambd())
-
-        if args.exclude:
-            pipe.append_command(CliExcludeCommand(args.exclude))
-
-        return pipe
+    def _get_pipeline(self) -> PromptPipeline:
+        """This is a pipeline for the purpose of showcasing.
+        Since all the parameters of each command is variable, the command
+        sacrifices the composability.
+        It is good for you to create your own pipeline, and name it
+        so you can use it as a preset."""
+        ...
+        tokenizer = self._initialize_tokenizer()
+        filterpipe = self._initialize_filter_pipeline()
+        return self._initialize_pipeline()(tokenizer, filterpipe)
 
 
-def prepare_readline() -> None:
-    histfile = os.path.join(os.path.expanduser("~"), ".sanipro_history")
+class IHistoryManager(ABC):
+    """Uses the GNU readline to aid user input."""
 
-    try:
-        readline.read_history_file(histfile)
-        h_len = readline.get_current_history_length()
-    except FileNotFoundError:
-        open(histfile, "wb").close()
-        h_len = 0
+    @classmethod
+    def prepare_readline(cls) -> None:
+        """The common interface to prepare the readline module."""
 
-    def save(prev_h_len, histfile):
-        new_h_len = readline.get_current_history_length()
-        readline.append_history_file(new_h_len - prev_h_len, histfile)
 
-    atexit.register(save, h_len, histfile)
+class ReadlineHistoryManager(IHistoryManager):
+    """Uses the GNU readline module for storing/recovering the user input.
+    It is probablly a normal usecase."""
+
+    @classmethod
+    def prepare_readline(cls) -> None:
+        histfile = os.path.join(os.path.expanduser("~"), ".sanipro_history")
+
+        try:
+            readline.read_history_file(histfile)
+            h_len = readline.get_current_history_length()
+        except FileNotFoundError:
+            open(histfile, "wb").close()
+            h_len = 0
+
+        def save(prev_h_len, histfile):
+            new_h_len = readline.get_current_history_length()
+            readline.append_history_file(new_h_len - prev_h_len, histfile)
+
+        atexit.register(save, h_len, histfile)
 
 
 def app():
@@ -759,11 +784,11 @@ def app():
         args = CliArgsNamespaceDemo.from_sys_argv(sys.argv[1:])
         cli_commands = CliCommandsDemo(args)
 
-        cli_hooks.on_init.append(prepare_readline)
+        cli_hooks.on_init.append(ReadlineHistoryManager.prepare_readline)
         cli_hooks.execute(cli_hooks.on_init)
 
         for key, val in args.__dict__.items():
-            logger.debug(f"(settings) {key} = {val!r}")
+            print(f"(settings) {key} = {val!r}")
 
         log_level = cli_commands.get_logger_level()
         logger_root.setLevel(log_level)

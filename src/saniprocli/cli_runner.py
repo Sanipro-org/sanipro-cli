@@ -3,7 +3,7 @@ import sys
 import time
 from abc import ABC, abstractmethod
 
-from sanipro.abc import MutablePrompt, TokenInterface
+from sanipro.abc import MutablePrompt
 from sanipro.diff import PromptDifferenceDetector
 from sanipro.pipeline import PromptPipeline
 from sanipro.promptset import SetCalculatorWrapper
@@ -56,14 +56,9 @@ class RunnerInteractiveSingle(RunnerInteractive, CliSingular):
     """Represents the runner with the interactive user interface
     that expects a single input of the prompt."""
 
-    def __init__(
-        self,
-        pipeline: PromptPipeline,
-        token_cls: type[TokenInterface],
-        strategy: InputStrategy,
-    ) -> None:
+    def __init__(self, pipeline: PromptPipeline, strategy: InputStrategy) -> None:
         self._pipeline = pipeline
-        self._token_cls = token_cls
+        self._token_cls = pipeline.token_cls
         self._input_strategy = strategy
 
         self._detector_cls = PromptDifferenceDetector
@@ -86,8 +81,8 @@ class RunnerInteractiveSingle(RunnerInteractive, CliSingular):
             logger.info(f"(statistics) {item}")
 
     def _execute_single(self, source: str) -> str:
-        unparsed = self._pipeline.parse(source, self._token_cls, auto_apply=True)
-        parsed = self._pipeline.tokens
+        unparsed = self._pipeline.tokenize(source)
+        parsed = self._pipeline.execute(source)
 
         self._show_cli_stat(unparsed, parsed)
 
@@ -120,12 +115,11 @@ class RunnerInteractiveMultiple(RunnerInteractive, CliPlural):
     def __init__(
         self,
         pipeline: PromptPipeline,
-        token_cls: type[TokenInterface],
         strategy: InputStrategy,
         calculator: SetCalculatorWrapper,
     ) -> None:
         self._pipeline = pipeline
-        self._token_cls = token_cls
+        self._token_cls = pipeline.token_cls
         self._input_strategy = strategy
 
         self._detector_cls = PromptDifferenceDetector
@@ -149,8 +143,8 @@ class RunnerInteractiveMultiple(RunnerInteractive, CliPlural):
             logger.info(f"(statistics) {item}")
 
     def _execute_multi(self, first: str, second: str) -> str:
-        prompt_first = self._pipeline.parse(first, self._token_cls)
-        prompt_second = self._pipeline.parse(second, self._token_cls)
+        prompt_first = self._pipeline.tokenize(first)
+        prompt_second = self._pipeline.tokenize(second)
 
         tokens_raw = [
             self._token_cls(name=x.name, weight=x.weight)
@@ -223,18 +217,13 @@ class RunnerNonInteractiveSingle(CliRunnable, CliSingular):
     Intended the case where the users feed the input from STDIN.
     """
 
-    def __init__(
-        self,
-        pipeline: PromptPipeline,
-        token_cls: type[TokenInterface],
-        strategy: InputStrategy,
-    ) -> None:
+    def __init__(self, pipeline: PromptPipeline, strategy: InputStrategy) -> None:
         self._pipeline = pipeline
-        self._token_cls = token_cls
+        self._token_cls = pipeline.token_cls
         self._input_strategy = strategy
 
     def _execute_single(self, source: str) -> str:
-        self._pipeline.parse(str(source), self._token_cls, auto_apply=True)
+        self._pipeline.tokenize(str(source))
         return str(self._pipeline)
 
     def _run_once(self) -> None:
