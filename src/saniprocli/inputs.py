@@ -5,6 +5,16 @@ from saniprocli.abc import InputStrategy
 from .color import style_for_readline
 
 
+def input_last_break(prompt: str = "") -> str:
+    """A workaround for preventing built-in input() to add '\\n'
+    to the input.
+
+    Once i thought it is posssible to handle it by sys.stdin,
+    and .read(), but realized without using input(),
+    it is hard to use the readline library."""
+    return "%s\n" % (input(prompt),)
+
+
 class OnelineInputStrategy(InputStrategy):
     """Represents the method to get a user input per prompt
     in interactive mode.
@@ -20,7 +30,7 @@ class OnelineInputStrategy(InputStrategy):
     def input(self, prompt: str = "") -> str:
         if prompt == "":
             prompt = self.ps1
-        return input(style_for_readline(prompt))
+        return input_last_break(style_for_readline(prompt))
 
 
 class MultipleInputStrategy(InputStrategy):
@@ -54,7 +64,7 @@ class MultipleInputStrategy(InputStrategy):
 
         while True:
             try:
-                line = input(style_for_readline(_prompt))
+                line = input_last_break(style_for_readline(_prompt))
                 buffer.append(line)
                 _prompt = self.ps2
             except EOFError:

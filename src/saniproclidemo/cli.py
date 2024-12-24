@@ -6,7 +6,6 @@ import os
 import pprint
 import readline
 import sys
-from tempfile import tempdir
 import typing
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
@@ -41,7 +40,14 @@ from sanipro.filters.utils import (
     sort_by_weight,
     sort_lexicographically,
 )
-from sanipro.parser import ParserV1, ParserV2, TokenInteractive, TokenNonInteractive
+from sanipro.parser import (
+    DummyParser,
+    ParserInterface,
+    ParserV1,
+    ParserV2,
+    TokenInteractive,
+    TokenNonInteractive,
+)
 from sanipro.pipeline import PromptPipeline, PromptPipelineV1, PromptPipelineV2
 from sanipro.promptset import SetCalculatorWrapper
 from sanipro.tokenizer import PromptTokenizer, PromptTokenizerV1, PromptTokenizerV2
@@ -756,12 +762,23 @@ class CliCommandsDemo(CliCommands):
             else inputs.MultipleInputStrategy(self._args.ps1, self._args.ps2)
         )
 
+    def _initialize_parser(self) -> type[ParserInterface]:
+        if self._args.is_tfind():
+            return DummyParser
+        else:
+            return ParserV2 if self._args.is_parser_v2() else ParserV1
+
     def _initialize_tokenizer(self) -> PromptTokenizer:
         token_cls = TokenInteractive if self._args.interactive else TokenNonInteractive
-        parser_cls = ParserV2 if self._args.is_parser_v2() else ParserV1
-        tokenizer_cls = (
-            PromptTokenizerV2 if self._args.is_parser_v2() else PromptTokenizerV1
-        )
+        parser_cls = self._initialize_parser()
+
+        tokenizer_cls = None
+        if self._args.is_parser_v2():
+            tokenizer_cls = PromptTokenizerV2
+        elif self._args.is_tfind():
+            tokenizer_cls = PromptTokenizerV2
+        else:
+            tokenizer_cls = PromptTokenizerV1
         delimiter = Delimiter(self._args.input_delimiter, self._args.output_delimiter)
         return tokenizer_cls(parser_cls, token_cls, delimiter)
 
@@ -799,12 +816,13 @@ class CliCommandsDemo(CliCommands):
             return RunnerSetOperation(pipe, input_strategy, calculator)
         elif self._args.is_tfind():
             return RunnerTagFind.create_from_csv(
+                pipeline=pipe,
                 text=self._args.infile,
                 strategy=input_strategy,
                 delim=self._args.field_delimiter,
                 key_idx=self._args.key_field,
                 value_idx=self._args.value_field,
-                tempdir=self._args.tempdir
+                tempdir=self._args.tempdir,
             )
         else:  # default
             return RunnerFilter(pipe, input_strategy)

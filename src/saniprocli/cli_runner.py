@@ -1,6 +1,7 @@
 import logging
 import os
 import readline
+import subprocess
 import sys
 import tempfile
 import time
@@ -50,11 +51,19 @@ class RunnerInteractive(CliRunnable, CliRunnableInnerRun, ABC):
             f"Program was launched up at {time.asctime()}.\n"
         )
 
+    def _on_init(self) -> None:
+        """The method to be called before the actual interaction."""
+
+    def _on_exit(self) -> None:
+        """The method to be called after the actual interaction."""
+
     def run(self) -> None:
         cli_hooks.execute(cli_hooks.on_interactive)
         self._write = sys.stdout.write
         self._try_banner()
+        self._on_init()
         self._start_loop()
+        self._on_exit()
 
 
 class RunnerInteractiveSingle(RunnerInteractive, CliSingular):
@@ -250,18 +259,18 @@ class RunnerSetOperation(RunnerInteractiveMultiple, StatShowable):
             logger.info(f"(statistics) {item}")
 
     def _execute_multi_inner(self, first: str, second: str) -> str:
-        prompt_first = self._pipeline.tokenize(first)
-        prompt_second = self._pipeline.tokenize(second)
+        prompt_first_before = self._pipeline.tokenize(first)
+        prompt_second_before = self._pipeline.tokenize(second)
 
-        tokens_raw = [
+        prompt = [
             self._token_cls(name=x.name, weight=x.weight)
-            for x in self._calculator.do_math(prompt_first, prompt_second)
+            for x in self._calculator.do_math(prompt_first_before, prompt_second_before)
         ]
 
-        tokens = [str(token) for token in tokens_raw]
+        tokens = [str(token) for token in prompt]
 
-        self._show_cli_stat(prompt_first, tokens_raw)
-        self._show_cli_stat(prompt_second, tokens_raw)
+        self._show_cli_stat(prompt_first_before, prompt)
+        self._show_cli_stat(prompt_second_before, prompt)
 
         selialized = self._pipeline.delimiter.sep_output.join(tokens)
         return selialized
@@ -271,15 +280,22 @@ class RunnerTagFind(RunnerInteractiveSingle):
     """Represents the runner specialized for the filtering mode."""
 
     def __init__(
-        self, tags_n_count: dict[str, str], strategy: InputStrategy, tempdir: str
+        self,
+        pipeline: PromptPipeline,
+        tags_n_count: dict[str, str],
+        strategy: InputStrategy,
+        tempdir: str,
     ) -> None:
+        self._pipeline = pipeline
         self._input_strategy = strategy
         self.tags_n_count: dict[str, str] = tags_n_count
         self.tempdir = tempdir
+        self._histfile = ""
 
     @classmethod
     def create_from_csv(
         cls,
+        pipeline: PromptPipeline,
         text: typing.TextIO,
         strategy: InputStrategy,
         delim: str,
@@ -303,50 +319,57 @@ class RunnerTagFind(RunnerInteractiveSingle):
             try:
                 for row in map(
                     lambda line: line.split(delim),
-                    map(lambda ln: ln.strip("\n"), fp.readlines()),
+                    map(lambda ln: ln.strip("\n").replace("_", " "), fp.readlines()),
                 ):
                     dict_ |= {row[key_idx]: row[value_idx]}
             except IndexError:
                 raise IndexError("failed to get the element of the row number")
 
-        return cls(dict_, strategy, tempdir)
+        return cls(pipeline, dict_, strategy, tempdir)
 
-    def _create_histfile_at_dev_shm(self) -> str:
+    def _on_init(self) -> None:
+        histfile = None
         with tempfile.NamedTemporaryFile(delete=False, dir=self.tempdir) as fp:
             histfile = fp.name
             for key in self.tags_n_count.keys():
                 fp.write(f"{key}\n".encode())
-        return histfile
 
-    def _prepare_readline_with_histfile(self, histfile: str) -> None:
+        # so that the file is deleted after the program exits
+        self._histfile = histfile
+
         try:
             readline.read_history_file(histfile)
         except FileNotFoundError:
             logger.exception(f"failed to read history file: {histfile}")
 
-    def _start_loop(self) -> None:
-        histfile = self._create_histfile_at_dev_shm()
-        self._prepare_readline_with_histfile(histfile)
+    def _on_exit(self) -> None:
+        if self._histfile:
+            os.remove(self._histfile)
 
-        self._write = sys.stdout.write
-
-        while True:
-            try:
-                try:
-                    prompt_input = self._input_strategy.input()
-                    if prompt_input:
-                        out = self._execute_single(prompt_input)
-                        self._write(f"{out}\n")
-                except EOFError as e:
-                    break
-            except ValueError as e:  # like unclosed parentheses
-                logger.fatal(f"error: {e}")
-            except KeyboardInterrupt:
-                self._write("\nKeyboardInterrupt\n")
-        self._write(f"\n")
-
-        os.remove(histfile)
+    def copy_to_clipboard(self, text: str) -> None:
+        """Check if clipboard API is available and copy to clipboard, if possible."""
+        if os.name == "nt":
+            subprocess.run(["clip.exe"], input=text.encode())
+        elif os.name == "posix":
+            if "Microsoft" in open("/proc/version").read():
+                subprocess.run(["clip.exe"], input=text.encode())
+            else:
+                subprocess.run(
+                    ["xclip", "-selection", "clipboard"], input=text.encode()
+                )
 
     def _execute_single_inner(self, source: str) -> str:
-        answer = self.tags_n_count.get(source, "no tag found")
-        return answer
+        tokens = [
+            "%s\t%s" % (str(token), self.tags_n_count.get(token.name, "null"))
+            for token in self._pipeline.tokenize(source)
+        ]
+        selialized = self._pipeline.delimiter.sep_output.join(tokens)
+
+        try:
+            self.copy_to_clipboard(selialized)
+        except subprocess.SubprocessError:
+            logger.error("failed to copy to clipboard")
+        except FileNotFoundError:
+            logger.debug("clipboard API is not available")
+
+        return selialized
