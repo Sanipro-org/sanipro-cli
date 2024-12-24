@@ -765,10 +765,13 @@ class CliCommandsDemo(CliCommands):
         self._args = args
 
     def _get_input_strategy(self) -> InputStrategy:
+        ps1 = self._args.ps1 if self._args.interactive else ""
+        ps2 = self._args.ps2 if self._args.interactive else ""
+
         return (
-            inputs.OnelineInputStrategy(self._args.ps1)
+            inputs.OnelineInputStrategy(ps1)
             if self._args.one_line
-            else inputs.MultipleInputStrategy(self._args.ps1, self._args.ps2)
+            else inputs.MultipleInputStrategy(ps1, ps2)
         )
 
     def _initialize_parser(self) -> type[ParserInterface]:
