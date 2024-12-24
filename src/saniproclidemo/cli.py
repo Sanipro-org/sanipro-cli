@@ -554,6 +554,14 @@ class CliSubcommandSearchTag(SubparserInjectable):
             ),
         )
 
+        parser.add_argument(
+            "-c",
+            "--clipboard",
+            default=False,
+            action="store_true",
+            help="Copy the result to the clipboard if possible.",
+        )
+
 
 class CliSubcommandFilter(SubparserInjectable):
     command_id: str = "filter"
@@ -679,6 +687,7 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
     value_field: int
     field_delimiter: str
     tempdir: str
+    clipboard: bool
 
     def is_parser_v2(self) -> bool:
         return self.operation_id == CliSubcommandParserV2.command_id
@@ -823,6 +832,7 @@ class CliCommandsDemo(CliCommands):
                 key_idx=self._args.key_field,
                 value_idx=self._args.value_field,
                 tempdir=self._args.tempdir,
+                use_clipboard=self._args.clipboard,
             )
         else:  # default
             return RunnerFilter(pipe, input_strategy)

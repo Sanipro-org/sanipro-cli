@@ -285,12 +285,14 @@ class RunnerTagFind(RunnerInteractiveSingle):
         tags_n_count: dict[str, str],
         strategy: InputStrategy,
         tempdir: str,
+        use_clipboard: bool = False,
     ) -> None:
         self._pipeline = pipeline
         self._input_strategy = strategy
         self.tags_n_count: dict[str, str] = tags_n_count
         self.tempdir = tempdir
         self._histfile = ""
+        self._use_clipboard = use_clipboard
 
     @classmethod
     def create_from_csv(
@@ -302,6 +304,7 @@ class RunnerTagFind(RunnerInteractiveSingle):
         key_idx: int,
         value_idx: int,
         tempdir: str,
+        use_clipboard: bool,
     ) -> Self:
         """Import the key-value storage from a comma-separated file.
         The index starts from 1. This is because common traditional command-line
@@ -325,7 +328,7 @@ class RunnerTagFind(RunnerInteractiveSingle):
             except IndexError:
                 raise IndexError("failed to get the element of the row number")
 
-        return cls(pipeline, dict_, strategy, tempdir)
+        return cls(pipeline, dict_, strategy, tempdir, use_clipboard)
 
     def _on_init(self) -> None:
         histfile = None
@@ -365,11 +368,12 @@ class RunnerTagFind(RunnerInteractiveSingle):
         ]
         selialized = self._pipeline.delimiter.sep_output.join(tokens)
 
-        try:
-            self.copy_to_clipboard(selialized)
-        except subprocess.SubprocessError:
-            logger.error("failed to copy to clipboard")
-        except FileNotFoundError:
-            logger.debug("clipboard API is not available")
+        if self._use_clipboard:
+            try:
+                self.copy_to_clipboard(selialized)
+            except subprocess.SubprocessError:
+                logger.error("failed to copy to clipboard")
+            except FileNotFoundError:
+                logger.debug("clipboard API is not available")
 
         return selialized
