@@ -58,7 +58,7 @@ class RunnerInteractive(CliRunnable, CliRunnableInnerRun, ABC):
         self._on_exit()
 
 
-class RunnerInteractiveSingle(RunnerInteractive, CliSingular):
+class RunnerInteractiveSingle(RunnerInteractive, CliSingular, ABC):
     """Represents the runner with the interactive user interface
     that expects a single input of the prompt."""
 
@@ -69,8 +69,9 @@ class RunnerInteractiveSingle(RunnerInteractive, CliSingular):
 
         self._detector_cls = PromptDifferenceDetector
 
+    @abstractmethod
     def _execute_single_inner(self, source: str) -> str:
-        return source
+        """Implements specific features that rely on inherited class."""
 
     def _execute_single(self, source: str) -> str:
         return self._execute_single_inner(source)
@@ -94,7 +95,7 @@ class RunnerInteractiveSingle(RunnerInteractive, CliSingular):
         self._write(f"\n")
 
 
-class RunnerInteractiveMultiple(RunnerInteractive, CliPlural):
+class RunnerInteractiveMultiple(RunnerInteractive, CliPlural, ABC):
     """Represents the runner with the interactive user interface
     that expects two different prompts."""
 
@@ -111,8 +112,9 @@ class RunnerInteractiveMultiple(RunnerInteractive, CliPlural):
         self._detector_cls = PromptDifferenceDetector
         self._calculator = calculator
 
+    @abstractmethod
     def _execute_multi_inner(self, first: str, second: str) -> str:
-        raise NotImplementedError
+        """Implements specific features that rely on inherited class."""
 
     def _execute_multi(self, first: str, second: str) -> str:
         return self._execute_multi_inner(first, second)
@@ -168,7 +170,7 @@ class RunnerInteractiveMultiple(RunnerInteractive, CliPlural):
         self._write(f"\n")
 
 
-class RunnerNonInteractiveSingle(CliRunnable, CliSingular):
+class RunnerNonInteractiveSingle(CliRunnable, CliSingular, ABC):
     """Represents the method for the program to interact
     with the users in non-interactive mode.
 
@@ -180,9 +182,12 @@ class RunnerNonInteractiveSingle(CliRunnable, CliSingular):
         self._token_cls = pipeline.token_cls
         self._input_strategy = strategy
 
+    @abstractmethod
+    def _execute_single_inner(self, source: str) -> str:
+        """Implements specific features that rely on inherited class."""
+
     def _execute_single(self, source: str) -> str:
-        self._pipeline.tokenize(str(source))
-        return str(self._pipeline)
+        return self._execute_single_inner(source)
 
     def _run_once(self) -> None:
         self._write = print

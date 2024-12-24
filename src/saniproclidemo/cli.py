@@ -54,12 +54,16 @@ from sanipro.tokenizer import PromptTokenizer, PromptTokenizerV1, PromptTokenize
 
 from saniprocli import cli_hooks, inputs
 from saniprocli.abc import CliRunnable, InputStrategy
-from saniprocli.cli_runner import RunnerNonInteractiveSingle
 from saniprocli.color import style
 from saniprocli.commands import CliArgsNamespaceDefault, CliCommands
 from saniprocli.help_formatter import SaniproHelpFormatter
 from saniprocli.logger import logger_fp
-from saniproclidemo.demo_runner import RunnerFilter, RunnerSetOperation, RunnerTagFind
+from saniproclidemo.demo_runner import (
+    RunnerFilter,
+    RunnerFilterNonInteractive,
+    RunnerSetOperation,
+    RunnerTagFind,
+)
 
 logging.basicConfig(
     format=(
@@ -811,7 +815,7 @@ class CliCommandsDemo(CliCommands):
         input_strategy = self._get_input_strategy()
 
         if not self._args.interactive:
-            return RunnerNonInteractiveSingle(pipe, input_strategy)
+            return RunnerFilterNonInteractive(pipe, input_strategy)
 
         if not self._args.is_tfind():
             cli_hooks.on_init.append(prepare_readline)

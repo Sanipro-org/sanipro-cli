@@ -47,16 +47,11 @@ class CliSingular(ABC):
 
     @abstractmethod
     def __init__(self, pipeline: IPromptPipeline, strategy: InputStrategy) -> None:
-        """Common constructor interface that handles the
-        single input."""
+        """Common constructor interface that handles the single input."""
 
     @abstractmethod
     def _execute_single(self, source: str) -> str:
-        """Process the input prompt, and returns the text to show it later.
-
-        Another feature can be implements into this method. Showing statistics
-        regarding the prompt, for example.
-        """
+        """Process the input prompt, and returns the text to show it later."""
 
 
 class CliPlural(ABC):
@@ -75,10 +70,7 @@ class CliPlural(ABC):
 
     @abstractmethod
     def _execute_multi(self, first: str, second: str) -> str:
-        """Process the two prompts and return the text to show it later.
-        Another feature can be implements into this method. Showing statistics
-        regarding the prompt, for example.
-        """
+        """Process the two prompts and return the text to show it later."""
 
 
 class ParserAppendable(ABC):

@@ -10,7 +10,11 @@ from sanipro.compatible import Self
 from sanipro.pipeline import PromptPipeline
 
 from saniprocli.abc import InputStrategy, StatShowable
-from saniprocli.cli_runner import RunnerInteractiveMultiple, RunnerInteractiveSingle
+from saniprocli.cli_runner import (
+    RunnerInteractiveMultiple,
+    RunnerInteractiveSingle,
+    RunnerNonInteractiveSingle,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +92,7 @@ class RunnerTagFind(RunnerInteractiveSingle):
         if self._histfile:
             os.remove(self._histfile)
 
-    def copy_to_clipboard(self, text: str) -> None:
+    def _copy_to_clipboard(self, text: str) -> None:
         """Check if clipboard API is available and copy to clipboard, if possible."""
         if os.name == "nt":
             subprocess.run(["clip.exe"], input=text.encode())
@@ -109,7 +113,7 @@ class RunnerTagFind(RunnerInteractiveSingle):
 
         if self._use_clipboard:
             try:
-                self.copy_to_clipboard(selialized)
+                self._copy_to_clipboard(selialized)
             except subprocess.SubprocessError:
                 logger.error("failed to copy to clipboard")
             except FileNotFoundError:
@@ -184,3 +188,15 @@ class RunnerSetOperation(RunnerInteractiveMultiple, StatShowable):
 
         selialized = self._pipeline.delimiter.sep_output.join(tokens)
         return selialized
+
+
+class RunnerFilterNonInteractive(RunnerNonInteractiveSingle):
+    """Represents the method for the program to interact
+    with the users in non-interactive mode.
+
+    Intended the case where the users feed the input from STDIN.
+    """
+
+    def _execute_single_inner(self, source: str) -> str:
+        self._pipeline.tokenize(str(source))
+        return str(self._pipeline)

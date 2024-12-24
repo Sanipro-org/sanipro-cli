@@ -1,19 +1,18 @@
 import argparse
 import logging
+from abc import ABC, abstractmethod
 from collections.abc import Sequence
 
 from sanipro.compatible import Self
 from sanipro.pipeline import PromptPipeline
 from sanipro.utils import HasPrettyRepr
 
-from saniprocli import inputs
 from saniprocli.abc import (
     CliRunnable,
     ParserAppendable,
     PipelineGettable,
     SubParserAppendable,
 )
-from saniprocli.cli_runner import RunnerInteractiveSingle, RunnerNonInteractiveSingle
 
 from .help_formatter import SaniproHelpFormatter
 from .logger import get_log_level_from
@@ -140,7 +139,7 @@ class CliArgsNamespaceDefault(HasPrettyRepr, ParserAppendable, SubParserAppendab
         return args
 
 
-class CliCommands(PipelineGettable):
+class CliCommands(PipelineGettable, ABC):
     def __init__(self, args: CliArgsNamespaceDefault):
         self._args = args
 
@@ -153,27 +152,11 @@ class CliCommands(PipelineGettable):
         except ValueError:
             raise ValueError("the maximum two -v flags can only be added")
 
+    @abstractmethod
     def to_runner(self) -> CliRunnable:
         """The default factory method for Runner class.
 
         Instantiated instance will be switched by the command option."""
-
-        pipe = self._get_pipeline()
-        ps1 = self._args.ps1
-        ps2 = self._args.ps2
-
-        strategy = (
-            inputs.OnelineInputStrategy(ps1)
-            if self._args.one_line
-            else inputs.MultipleInputStrategy(ps1, ps2)
-        )
-        runner = (
-            RunnerInteractiveSingle(pipe, strategy)
-            if self._args.interactive
-            else RunnerNonInteractiveSingle(pipe, strategy)
-        )
-
-        return runner
 
     def _get_pipeline(self) -> PromptPipeline:
         raise NotImplementedError
