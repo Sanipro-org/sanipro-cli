@@ -1,9 +1,11 @@
-import argparse
 from abc import ABC, abstractmethod
 
 from sanipro.abc import IPromptPipeline, MutablePrompt
+from sanipro.diff import PromptDifferenceDetector
 from sanipro.pipeline import PromptPipeline
 from sanipro.promptset import SetCalculatorWrapper
+
+from saniprocli.sanipro_argparse import SaniproArgumentParser
 
 
 class InputStrategy(ABC):
@@ -24,20 +26,14 @@ class CliRunnable(ABC):
         """Start processing."""
 
 
-class CliRunnableInnerRun(ABC):
-    """Contains while loop"""
-
-    @abstractmethod
-    def _start_loop(self) -> None:
-        """The actual start of the interaction with the user.
-
-        This should be the specific implementation of the process
-        inside the loop."""
-
-
 class StatShowable(ABC):
     @abstractmethod
-    def _show_cli_stat(self, before: MutablePrompt, after: MutablePrompt) -> None:
+    def _show_cli_stat(
+        self,
+        detector: type[PromptDifferenceDetector],
+        before: MutablePrompt,
+        after: MutablePrompt,
+    ) -> None:
         """Explains what has changed in the unprocessed/processsed prompts."""
 
 
@@ -78,7 +74,7 @@ class ParserAppendable(ABC):
 
     @classmethod
     @abstractmethod
-    def _append_parser(cls, parser: argparse.ArgumentParser) -> None:
+    def _append_parser(cls, parser: SaniproArgumentParser) -> None:
         """Appends user-defined parser."""
 
 
@@ -87,8 +83,20 @@ class SubParserAppendable(ABC):
 
     @classmethod
     @abstractmethod
-    def _append_subparser(cls, parser: argparse.ArgumentParser) -> None:
+    def _append_subparser(cls, parser: SaniproArgumentParser) -> None:
         """Appends user-defined subparser."""
+
+
+class ConsoleWritable(ABC):
+    """Traits that writes and errors."""
+
+    @abstractmethod
+    def _write(self, text: str) -> None:
+        """Writes the message to the standard output."""
+
+    @abstractmethod
+    def _ewrite(self, text: str) -> None:
+        """Writes the message to the standard error output."""
 
 
 class PipelineGettable(ABC):

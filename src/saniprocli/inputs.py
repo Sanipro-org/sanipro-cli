@@ -15,6 +15,28 @@ def input_last_break(prompt: str = "") -> str:
     return "%s\n" % (input(prompt),)
 
 
+class DirectInputStrategy(InputStrategy):
+    """Calles sys.stdin.readline() to get a user input."""
+
+    def input(self, prompt: str = "") -> str:
+        buffer = []
+
+        while True:
+            try:
+                line = input(prompt)
+                buffer.append(line)
+            except KeyboardInterrupt:
+                sys.stderr.write("^C")
+                raise EOFError
+            except EOFError:
+                if buffer:
+                    break
+                else:
+                    raise
+
+        return "".join(buffer)
+
+
 class OnelineInputStrategy(InputStrategy):
     """Represents the method to get a user input per prompt
     in interactive mode.
@@ -56,7 +78,7 @@ class MultipleInputStrategy(InputStrategy):
     def input(self, prompt: str = "") -> str:
         buffer = []
         _prompt = ""
-        if prompt is not "":
+        if prompt != "":
             self.ps1 = prompt
             self.ps2 = prompt
         else:

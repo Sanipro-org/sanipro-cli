@@ -3,7 +3,6 @@ import sys
 import time
 from abc import ABC, abstractmethod
 
-from sanipro.diff import PromptDifferenceDetector
 from sanipro.pipeline import PromptPipeline
 from sanipro.promptset import SetCalculatorWrapper
 
@@ -11,8 +10,8 @@ from saniprocli import cli_hooks, color
 from saniprocli.abc import (
     CliPlural,
     CliRunnable,
-    CliRunnableInnerRun,
     CliSingular,
+    ConsoleWritable,
     InputStrategy,
 )
 
@@ -21,27 +20,30 @@ logger_root = logging.getLogger()
 logger = logging.getLogger(__name__)
 
 
-class RunnerInteractive(CliRunnable, CliRunnableInnerRun, ABC):
-    """Represents the method for the program to interact
-    with the users.
+class ConsoleWriter(ConsoleWritable):
+    def _write(self, text: str) -> None:
+        """Writes the text to the standard output."""
+        sys.stdout.write(text)
 
-    This runner is used when the user decided to use
-    the interactive mode.
+    def _ewrite(self, text: str) -> None:
+        """Writes the text to the standard error output."""
+        sys.stderr.write(text)
 
-    This is similar what Python interpreter does like."""
 
-    @abstractmethod
-    def _start_loop(self) -> None:
-        """The actual start of the interaction with the user."""
-
+class BannerMixin(ConsoleWriter):
     def _try_banner(self) -> None:
         """Tries to show the banner if possible,
 
         TODO implement an option whether to show the banner or not."""
-        self._write(
+        self._ewrite(
             f"Sanipro (created by iigau) in interactive mode\n"
             f"Program was launched up at {time.asctime()}.\n"
         )
+
+
+class _Runner(CliRunnable, ABC):
+    """Represents the method for the program to interact
+    with the users."""
 
     def _on_init(self) -> None:
         """The method to be called before the actual interaction."""
@@ -49,16 +51,44 @@ class RunnerInteractive(CliRunnable, CliRunnableInnerRun, ABC):
     def _on_exit(self) -> None:
         """The method to be called after the actual interaction."""
 
+    @abstractmethod
+    def _start_loop(self) -> None:
+        """The actual start of the interaction with the user.
+
+        This should be the specific implementation of the process
+        inside the loop."""
+
+    @abstractmethod
+    def run(self) -> None: ...
+
+
+class RunnerInteractive(_Runner, BannerMixin):
+    """This runner is used when the user decided to use
+    the interactive mode."""
+
     def run(self) -> None:
         cli_hooks.execute(cli_hooks.on_interactive)
-        self._write = sys.stdout.write
         self._try_banner()
         self._on_init()
         self._start_loop()
         self._on_exit()
 
 
-class RunnerInteractiveSingle(RunnerInteractive, CliSingular, ABC):
+class RunnerNonInteractive(_Runner):
+    """Represents the method for the program to interact
+    with the users in non-interactive mode.
+
+    Intended the case where the users feed the input from STDIN.
+    """
+
+    def run(self) -> None:
+        cli_hooks.execute(cli_hooks.on_interactive)
+        self._on_init()
+        self._start_loop()
+        self._on_exit()
+
+
+class ExecuteSingle(ConsoleWriter, CliSingular, ABC):
     """Represents the runner with the interactive user interface
     that expects a single input of the prompt."""
 
@@ -66,8 +96,6 @@ class RunnerInteractiveSingle(RunnerInteractive, CliSingular, ABC):
         self._pipeline = pipeline
         self._token_cls = pipeline.token_cls
         self._input_strategy = strategy
-
-        self._detector_cls = PromptDifferenceDetector
 
     @abstractmethod
     def _execute_single_inner(self, source: str) -> str:
@@ -77,8 +105,6 @@ class RunnerInteractiveSingle(RunnerInteractive, CliSingular, ABC):
         return self._execute_single_inner(source)
 
     def _start_loop(self) -> None:
-        self._write = sys.stdout.write
-
         while True:
             try:
                 try:
@@ -91,11 +117,11 @@ class RunnerInteractiveSingle(RunnerInteractive, CliSingular, ABC):
             except ValueError as e:  # like unclosed parentheses
                 logger.fatal(f"error: {e}")
             except KeyboardInterrupt:
-                self._write("\nKeyboardInterrupt\n")
-        self._write(f"\n")
+                self._ewrite("\nKeyboardInterrupt\n")
+        self._ewrite(f"\n")
 
 
-class RunnerInteractiveMultiple(RunnerInteractive, CliPlural, ABC):
+class ExecuteDual(ConsoleWriter, CliPlural, ABC):
     """Represents the runner with the interactive user interface
     that expects two different prompts."""
 
@@ -109,7 +135,6 @@ class RunnerInteractiveMultiple(RunnerInteractive, CliPlural, ABC):
         self._token_cls = pipeline.token_cls
         self._input_strategy = strategy
 
-        self._detector_cls = PromptDifferenceDetector
         self._calculator = calculator
 
     @abstractmethod
@@ -128,13 +153,11 @@ class RunnerInteractiveMultiple(RunnerInteractive, CliPlural, ABC):
             except EOFError as e:
                 raise EOFError("EOF received. Going back to previous state.")
             except KeyboardInterrupt:
-                self._write("\nKeyboardInterrupt\n")
+                self._ewrite("\nKeyboardInterrupt\n")
             except Exception as e:
                 logger.fatal(f"error: {e}")
 
     def _start_loop(self) -> None:
-        self._write = sys.stdout.write
-
         while True:
             try:
                 state = 00
@@ -167,39 +190,4 @@ class RunnerInteractiveMultiple(RunnerInteractive, CliPlural, ABC):
                         break  # go to next set of prompts
             except EOFError:
                 break
-        self._write(f"\n")
-
-
-class RunnerNonInteractiveSingle(CliRunnable, CliSingular, ABC):
-    """Represents the method for the program to interact
-    with the users in non-interactive mode.
-
-    Intended the case where the users feed the input from STDIN.
-    """
-
-    def __init__(self, pipeline: PromptPipeline, strategy: InputStrategy) -> None:
-        self._pipeline = pipeline
-        self._token_cls = pipeline.token_cls
-        self._input_strategy = strategy
-
-    @abstractmethod
-    def _execute_single_inner(self, source: str) -> str:
-        """Implements specific features that rely on inherited class."""
-
-    def _execute_single(self, source: str) -> str:
-        return self._execute_single_inner(source)
-
-    def _run_once(self) -> None:
-        self._write = print
-        sentence = ""
-        try:
-            sentence = self._input_strategy.input().strip()
-        except (KeyboardInterrupt, EOFError):
-            sys.stderr.write("\n")
-            sys.exit(1)
-        finally:
-            out = self._execute_single(sentence)
-            self._write(out)
-
-    def run(self) -> None:
-        self._run_once()
+        self._ewrite(f"\n")

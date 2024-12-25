@@ -15,6 +15,7 @@ from typing import NamedTuple
 from sanipro.abc import MutablePrompt, Prompt
 from sanipro.compatible import Self
 from sanipro.delimiter import Delimiter
+from sanipro.diff import PromptDifferenceDetector
 from sanipro.filter_exec import FilterExecutor
 from sanipro.filters.abc import ExecutePrompt, ReordererStrategy
 from sanipro.filters.exclude import ExcludeCommand
@@ -58,11 +59,14 @@ from saniprocli.color import style
 from saniprocli.commands import CliArgsNamespaceDefault, CliCommands
 from saniprocli.help_formatter import SaniproHelpFormatter
 from saniprocli.logger import logger_fp
+from saniprocli.sanipro_argparse import SaniproArgumentParser
 from saniproclidemo.demo_runner import (
-    RunnerFilter,
+    RunnerFilterInteractive,
     RunnerFilterNonInteractive,
-    RunnerSetOperation,
-    RunnerTagFind,
+    RunnerSetOperationInteractiveDual,
+    RunnerSetOperationIteractiveMono,
+    RunnerTagFindInteractive,
+    RunnerTagFindNonInteractive,
 )
 
 logging.basicConfig(
@@ -518,6 +522,17 @@ class CliSubcommandSearchTag(SubparserInjectable):
         )
 
         parser.add_argument(
+            "-i",
+            "--interactive",
+            default=False,
+            action="store_true",
+            help=(
+                "Provides the REPL interface to play with prompts. "
+                "The program behaves like the Python interpreter."
+            ),
+        )
+
+        parser.add_argument(
             "-k",
             "--key-field",
             default=1,
@@ -585,6 +600,17 @@ class CliSubcommandFilter(SubparserInjectable):
             help=("Applies a filter to the prompt."),
         )
 
+        parser.add_argument(
+            "-i",
+            "--interactive",
+            default=False,
+            action="store_true",
+            help=(
+                "Provides the REPL interface to play with prompts. "
+                "The program behaves like the Python interpreter."
+            ),
+        )
+
         subparser = parser.add_subparsers(
             title="filter",
             description=(
@@ -593,6 +619,7 @@ class CliSubcommandFilter(SubparserInjectable):
             ),
             dest="filter_id",
             metavar="FILTER",
+            required=True,
         )
 
         for cmd in cls.filter_classes:
@@ -611,12 +638,31 @@ class CliSubcommandSetOperation(SubparserInjectable):
             help=("Applies a set operation to the two prompts."),
         )
 
+        parser.add_argument(
+            "-a",
+            "--fixed-prompt",
+            type=argparse.FileType("r"),
+            help=("Feed the elements of set a from a file or stdin."),
+        )
+
+        parser.add_argument(
+            "-i",
+            "--interactive",
+            default=False,
+            action="store_true",
+            help=(
+                "Provides the REPL interface to play with prompts. "
+                "The program behaves like the Python interpreter."
+            ),
+        )
+
         subparser = parser.add_subparsers(
             title=cls.command_id,
             description="Applies a set operation to the two prompts.",
             help="List of available set operations to the two prompts.",
             dest="set_op_id",
             metavar="SET_OPERATION",
+            required=True,
         )
 
         subparser.add_parser(
@@ -655,11 +701,23 @@ class CliSubcommandParserV2(SubparserInjectable):
             ),
         )
 
+        parser.add_argument(
+            "-i",
+            "--interactive",
+            default=False,
+            action="store_true",
+            help=(
+                "Provides the REPL interface to play with prompts. "
+                "The program behaves like the Python interpreter."
+            ),
+        )
+
 
 class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
     """Custom subcommand implementation by user"""
 
     # global options
+    interactive: bool
     exclude: Sequence[str]
     roundup = 2
     replace_to: str
@@ -688,6 +746,7 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
     field_delimiter: str
     tempdir: str
     clipboard: bool
+    fixed_prompt: typing.TextIO
 
     def is_parser_v2(self) -> bool:
         return self.operation_id == CliSubcommandParserV2.command_id
@@ -702,7 +761,7 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
         return self.operation_id == CliSubcommandSetOperation.command_id
 
     @classmethod
-    def _do_append_parser(cls, parser: argparse.ArgumentParser) -> None:
+    def _do_append_parser(cls, parser: SaniproArgumentParser) -> None:
         parser.add_argument(
             "-u",
             "--roundup",
@@ -726,9 +785,9 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
         )
 
     @classmethod
-    def _do_append_subparser(cls, parser: argparse.ArgumentParser) -> None:
+    def _do_append_subparser(cls, parser: SaniproArgumentParser) -> None:
         subparser = parser.add_subparsers(
-            title="operations", dest="operation_id", required=False
+            title="operations", dest="operation_id", required=True
         )
 
         classes: list[type[SubparserInjectable]] = [
@@ -765,8 +824,11 @@ class CliCommandsDemo(CliCommands):
         self._args = args
 
     def _get_input_strategy(self) -> InputStrategy:
-        ps1 = self._args.ps1 if self._args.interactive else ""
-        ps2 = self._args.ps2 if self._args.interactive else ""
+        if not self._args.interactive:
+            return inputs.DirectInputStrategy()
+
+        ps1 = self._args.ps1
+        ps2 = self._args.ps2
 
         return (
             inputs.OnelineInputStrategy(ps1)
@@ -814,31 +876,52 @@ class CliCommandsDemo(CliCommands):
         """Returns a runner."""
         input_strategy = self._get_input_strategy()
 
-        if not self._args.interactive:
-            return RunnerFilterNonInteractive(pipe, input_strategy)
-
         if not self._args.is_tfind():
             cli_hooks.on_init.append(prepare_readline)
             cli_hooks.execute(cli_hooks.on_init)
 
-        if self._args.is_filter():
-            return RunnerFilter(pipe, input_strategy)
+        if self._args.is_filter() or self._args.is_parser_v2():
+            if self._args.interactive:
+                return RunnerFilterInteractive(
+                    pipe, input_strategy, PromptDifferenceDetector
+                )
+            return RunnerFilterNonInteractive(pipe, input_strategy)
         elif self._args.is_set_operation():
             calculator = SetCalculatorWrapper.create_from(self._args.set_op_id)
-            return RunnerSetOperation(pipe, input_strategy, calculator)
+            if self._args.interactive:
+                return RunnerSetOperationInteractiveDual(
+                    pipe, input_strategy, calculator, PromptDifferenceDetector
+                )
+            else:
+                return RunnerSetOperationIteractiveMono.create_from_text(
+                    pipe,
+                    input_strategy,
+                    calculator,
+                    PromptDifferenceDetector,
+                    self._args.fixed_prompt,
+                )
         elif self._args.is_tfind():
-            return RunnerTagFind.create_from_csv(
+            if self._args.interactive:
+                return RunnerTagFindInteractive.create_from_csv(
+                    pipeline=pipe,
+                    text=self._args.infile,
+                    strategy=input_strategy,
+                    delim=self._args.field_delimiter,
+                    key_idx=self._args.key_field,
+                    value_idx=self._args.value_field,
+                    tempdir=self._args.tempdir,
+                    use_clipboard=self._args.clipboard,
+                )
+            return RunnerTagFindNonInteractive.create_from_csv(
                 pipeline=pipe,
                 text=self._args.infile,
                 strategy=input_strategy,
                 delim=self._args.field_delimiter,
                 key_idx=self._args.key_field,
                 value_idx=self._args.value_field,
-                tempdir=self._args.tempdir,
-                use_clipboard=self._args.clipboard,
             )
         else:  # default
-            return RunnerFilter(pipe, input_strategy)
+            raise NotImplementedError
 
     def _get_pipeline(self) -> PromptPipeline:
         """This is a pipeline for the purpose of showcasing.

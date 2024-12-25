@@ -7,19 +7,89 @@ import typing
 
 from sanipro.abc import MutablePrompt
 from sanipro.compatible import Self
+from sanipro.diff import PromptDifferenceDetector
 from sanipro.pipeline import PromptPipeline
+from sanipro.promptset import SetCalculatorWrapper
 
 from saniprocli.abc import InputStrategy, StatShowable
 from saniprocli.cli_runner import (
-    RunnerInteractiveMultiple,
-    RunnerInteractiveSingle,
-    RunnerNonInteractiveSingle,
+    ExecuteDual,
+    ExecuteSingle,
+    RunnerInteractive,
+    RunnerNonInteractive,
 )
 
 logger = logging.getLogger(__name__)
 
 
-class RunnerTagFind(RunnerInteractiveSingle):
+class ShowCliStatMixin(StatShowable):
+    def _show_cli_stat(
+        self,
+        detector: type[PromptDifferenceDetector],
+        before: MutablePrompt,
+        after: MutablePrompt,
+    ) -> None:
+        for line in detector(before, after).get_summary():
+            logger.info("(statistics) %s", line)
+
+
+class RunnerTagFindNonInteractive(ExecuteSingle, RunnerNonInteractive):
+    """Represents the runner specialized for the filtering mode."""
+
+    def __init__(
+        self,
+        pipeline: PromptPipeline,
+        tags_n_count: dict[str, str],
+        strategy: InputStrategy,
+    ) -> None:
+        self._pipeline = pipeline
+        self._input_strategy = strategy
+        self.tags_n_count: dict[str, str] = tags_n_count
+        self._histfile = ""
+
+    @classmethod
+    def create_from_csv(
+        cls,
+        pipeline: PromptPipeline,
+        text: typing.TextIO,
+        strategy: InputStrategy,
+        delim: str,
+        key_idx: int,
+        value_idx: int,
+    ) -> Self:
+        """Import the key-value storage from a comma-separated file.
+        The index starts from 1. This is because common traditional command-line
+        utilities assume the field index originates from 1."""
+
+        if key_idx == value_idx:
+            raise ValueError("impossible to specify the same field number")
+        if key_idx < 1 or value_idx < 1:
+            raise ValueError("field number must be 1 or more")
+        key_idx -= 1
+        value_idx -= 1
+
+        dict_: dict[str, str] = {}
+        with text as fp:
+            try:
+                for row in map(
+                    lambda line: line.split(delim),
+                    map(lambda ln: ln.strip("\n").replace("_", " "), fp.readlines()),
+                ):
+                    dict_ |= {row[key_idx]: row[value_idx]}
+            except IndexError:
+                raise IndexError("failed to get the element of the row number")
+
+        return cls(pipeline, dict_, strategy)
+
+    def _execute_single_inner(self, source: str) -> str:
+        tokens = [
+            "%s\t%s" % (str(token), self.tags_n_count.get(token.name, "null"))
+            for token in self._pipeline.tokenize(source)
+        ]
+        return self._pipeline.delimiter.sep_output.join(tokens)
+
+
+class RunnerTagFindInteractive(ExecuteSingle, RunnerInteractive):
     """Represents the runner specialized for the filtering mode."""
 
     def __init__(
@@ -61,11 +131,15 @@ class RunnerTagFind(RunnerInteractiveSingle):
         value_idx -= 1
 
         dict_: dict[str, str] = {}
+
+        def _replace_underscore(line: str) -> str:
+            return line.strip("\n").replace("_", " ")
+
         with text as fp:
             try:
                 for row in map(
                     lambda line: line.split(delim),
-                    map(lambda ln: ln.strip("\n").replace("_", " "), fp.readlines()),
+                    map(_replace_underscore, fp.readlines()),
                 ):
                     dict_ |= {row[key_idx]: row[value_idx]}
             except IndexError:
@@ -122,55 +196,66 @@ class RunnerTagFind(RunnerInteractiveSingle):
         return selialized
 
 
-class RunnerFilter(RunnerInteractiveSingle, StatShowable):
+class RunnerFilterInteractive(ExecuteSingle, ShowCliStatMixin, RunnerInteractive):
     """Represents the runner specialized for the filtering mode."""
 
-    def _show_cli_stat(self, before: MutablePrompt, after: MutablePrompt) -> None:
-        detector = self._detector_cls(before, after)
-        items = [
-            f"before -> {detector.before_num}",
-            f"after -> {detector.after_num}",
-            f"reduced -> {detector.reduced_num}",
-        ]
+    def __init__(
+        self,
+        pipeline: PromptPipeline,
+        strategy: InputStrategy,
+        detector: type[PromptDifferenceDetector],
+    ) -> None:
+        self._pipeline = pipeline
+        self._token_cls = pipeline.token_cls
+        self._input_strategy = strategy
 
-        if detector.duplicated:
-            del_string = ", ".join(detector.duplicated)
-            items.append(f"duplicated -> {del_string}")
-        else:
-            items.append("no duplicates detected")
-
-        for item in items:
-            logger.info(f"(statistics) {item}")
+        self._detector_cls = detector
 
     def _execute_single_inner(self, source: str) -> str:
         unparsed = self._pipeline.tokenize(source)
         parsed = self._pipeline.execute(source)
 
-        self._show_cli_stat(unparsed, parsed)
+        self._show_cli_stat(self._detector_cls, unparsed, parsed)
 
         selialized = str(self._pipeline)
         return selialized
 
 
-class RunnerSetOperation(RunnerInteractiveMultiple, StatShowable):
-    """Represents the runner specialized for the set operation."""
+class RunnerFilterNonInteractive(ExecuteSingle, RunnerNonInteractive):
+    """Represents the runner specialized for the filtering mode."""
 
-    def _show_cli_stat(self, before: MutablePrompt, after: MutablePrompt) -> None:
-        detector = self._detector_cls(before, after)
-        items = [
-            f"before -> {detector.before_num}",
-            f"after -> {detector.after_num}",
-            f"reduced -> {detector.reduced_num}",
-        ]
+    def __init__(self, pipeline: PromptPipeline, strategy: InputStrategy) -> None:
+        self._pipeline = pipeline
+        self._token_cls = pipeline.token_cls
+        self._input_strategy = strategy
 
-        if detector.duplicated:
-            del_string = ", ".join(detector.duplicated)
-            items.append(f"duplicated -> {del_string}")
-        else:
-            items.append("no duplicates detected")
+    def _execute_single_inner(self, source: str) -> str:
+        self._pipeline.execute(source)
+        return str(self._pipeline)
 
-        for item in items:
-            logger.info(f"(statistics) {item}")
+
+class RunnerSetOperationInteractiveDual(
+    ExecuteDual, ShowCliStatMixin, RunnerInteractive
+):
+    """Represents the runner specialized for the set operation.
+
+    In set operation mode, the total number of tokens will be more
+    than prompt A or prompt B. Thus it is reasonable that showing
+    the difference between both prompt A and result, and prompt B and result."""
+
+    def __init__(
+        self,
+        pipeline: PromptPipeline,
+        strategy: InputStrategy,
+        calculator: SetCalculatorWrapper,
+        detector: type[PromptDifferenceDetector],
+    ) -> None:
+        self._pipeline = pipeline
+        self._token_cls = pipeline.token_cls
+        self._input_strategy = strategy
+
+        self._calculator = calculator
+        self._detector_cls = detector
 
     def _execute_multi_inner(self, first: str, second: str) -> str:
         prompt_first_before = self._pipeline.tokenize(first)
@@ -181,22 +266,58 @@ class RunnerSetOperation(RunnerInteractiveMultiple, StatShowable):
             for x in self._calculator.do_math(prompt_first_before, prompt_second_before)
         ]
 
-        tokens = [str(token) for token in prompt]
+        logger.info("(statistics) prompt A <> result")
+        self._show_cli_stat(self._detector_cls, prompt_first_before, prompt)
+        logger.info("(statistics) prompt B <> result")
+        self._show_cli_stat(self._detector_cls, prompt_second_before, prompt)
 
-        self._show_cli_stat(prompt_first_before, prompt)
-        self._show_cli_stat(prompt_second_before, prompt)
-
-        selialized = self._pipeline.delimiter.sep_output.join(tokens)
+        selialized = self._pipeline.delimiter.sep_output.join(
+            str(token) for token in prompt
+        )
         return selialized
 
 
-class RunnerFilterNonInteractive(RunnerNonInteractiveSingle):
-    """Represents the method for the program to interact
-    with the users in non-interactive mode.
+class RunnerSetOperationIteractiveMono(
+    ExecuteSingle, ShowCliStatMixin, RunnerNonInteractive
+):
 
-    Intended the case where the users feed the input from STDIN.
-    """
+    def __init__(
+        self,
+        pipeline: PromptPipeline,
+        strategy: InputStrategy,
+        calculator: SetCalculatorWrapper,
+        detector: type[PromptDifferenceDetector],
+        fixed_prompt: MutablePrompt,
+    ) -> None:
+        self._pipeline = pipeline
+        self._token_cls = pipeline.token_cls
+        self._input_strategy = strategy
+
+        self._calculator = calculator
+        self._detector_cls = detector
+        self._fixed_prompt = fixed_prompt
+
+    @classmethod
+    def create_from_text(
+        cls,
+        pipeline: PromptPipeline,
+        strategy: InputStrategy,
+        calculator: SetCalculatorWrapper,
+        detector: type[PromptDifferenceDetector],
+        text: typing.TextIO,
+    ) -> Self:
+        fixed_prompt = pipeline.tokenize(text.read())
+        return cls(pipeline, strategy, calculator, detector, fixed_prompt)
 
     def _execute_single_inner(self, source: str) -> str:
-        self._pipeline.tokenize(str(source))
-        return str(self._pipeline)
+        prompt_second_before = self._pipeline.tokenize(source)
+
+        prompt = [
+            self._token_cls(name=x.name, weight=x.weight)
+            for x in self._calculator.do_math(self._fixed_prompt, prompt_second_before)
+        ]
+
+        selialized = self._pipeline.delimiter.sep_output.join(
+            str(token) for token in prompt
+        )
+        return selialized

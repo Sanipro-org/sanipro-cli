@@ -1,4 +1,3 @@
-import argparse
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
@@ -13,6 +12,7 @@ from saniprocli.abc import (
     PipelineGettable,
     SubParserAppendable,
 )
+from saniprocli.sanipro_argparse import SaniproArgumentParser
 
 from .help_formatter import SaniproHelpFormatter
 from .logger import get_log_level_from
@@ -26,7 +26,6 @@ class CliArgsNamespaceDefault(HasPrettyRepr, ParserAppendable, SubParserAppendab
     """Default namespace for the argparser."""
 
     input_delimiter: str
-    interactive: bool
     one_line: bool
     output_delimiter: str
     ps1: str
@@ -34,7 +33,7 @@ class CliArgsNamespaceDefault(HasPrettyRepr, ParserAppendable, SubParserAppendab
     verbose: int
 
     @classmethod
-    def _append_parser(cls, parser: argparse.ArgumentParser) -> None:
+    def _append_parser(cls, parser: SaniproArgumentParser) -> None:
         """Add parser for functions included by default."""
 
         parser.add_argument(
@@ -43,17 +42,6 @@ class CliArgsNamespaceDefault(HasPrettyRepr, ParserAppendable, SubParserAppendab
             type=str,
             default=",",
             help=("Preferred delimiter string for the original prompts."),
-        )
-
-        parser.add_argument(
-            "-i",
-            "--interactive",
-            default=False,
-            action="store_true",
-            help=(
-                "Provides the REPL interface to play with prompts. "
-                "The program behaves like the Python interpreter."
-            ),
         )
 
         parser.add_argument(
@@ -107,22 +95,22 @@ class CliArgsNamespaceDefault(HasPrettyRepr, ParserAppendable, SubParserAppendab
         cls._do_append_parser(parser)
 
     @classmethod
-    def _do_append_parser(cls, parser: argparse.ArgumentParser) -> None:
+    def _do_append_parser(cls, parser: SaniproArgumentParser) -> None:
         raise NotImplementedError
 
     @classmethod
-    def _append_subparser(cls, parser: argparse.ArgumentParser) -> None:
+    def _append_subparser(cls, parser: SaniproArgumentParser) -> None:
         cls._do_append_subparser(parser)
 
     @classmethod
-    def _do_append_subparser(cls, parser: argparse.ArgumentParser) -> None:
+    def _do_append_subparser(cls, parser: SaniproArgumentParser) -> None:
         raise NotImplementedError
 
     @classmethod
     def from_sys_argv(cls, arg_val: Sequence[str]) -> Self:
         """Add parsers, and parse the commandline argument with it."""
 
-        parser = argparse.ArgumentParser(
+        parser = SaniproArgumentParser(
             prog="sanipro",
             description=(
                 "Toolbox for Stable Diffusion prompts. "
@@ -132,6 +120,7 @@ class CliArgsNamespaceDefault(HasPrettyRepr, ParserAppendable, SubParserAppendab
             epilog="Help for each filter is available, respectively.",
         )
 
+        # logger.debug("arg_val: %s", arg_val)
         cls._append_parser(parser)
         cls._append_subparser(parser)
 
