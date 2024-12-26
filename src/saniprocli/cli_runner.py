@@ -1,5 +1,4 @@
 import logging
-import sys
 import time
 from abc import ABC, abstractmethod
 
@@ -7,27 +6,12 @@ from sanipro.pipeline import PromptPipeline
 from sanipro.promptset import SetCalculatorWrapper
 
 from saniprocli import cli_hooks, color
-from saniprocli.abc import (
-    CliPlural,
-    CliRunnable,
-    CliSingular,
-    ConsoleWritable,
-    InputStrategy,
-)
+from saniprocli.abc import CliPlural, CliRunnable, CliSingular, InputStrategy
+from saniprocli.console import ConsoleWriter
 
 logger_root = logging.getLogger()
 
 logger = logging.getLogger(__name__)
-
-
-class ConsoleWriter(ConsoleWritable):
-    def _write(self, text: str) -> None:
-        """Writes the text to the standard output."""
-        sys.stdout.write(text)
-
-    def _ewrite(self, text: str) -> None:
-        """Writes the text to the standard error output."""
-        sys.stderr.write(text)
 
 
 class BannerMixin(ConsoleWriter):
@@ -72,6 +56,7 @@ class RunnerInteractive(_Runner, BannerMixin):
         self._on_init()
         self._start_loop()
         self._on_exit()
+        self._ewrite(f"\n")
 
 
 class RunnerNonInteractive(_Runner):
@@ -116,9 +101,6 @@ class ExecuteSingle(ConsoleWriter, CliSingular, ABC):
                     break
             except ValueError as e:  # like unclosed parentheses
                 logger.fatal(f"error: {e}")
-            except KeyboardInterrupt:
-                self._ewrite("\nKeyboardInterrupt\n")
-        self._ewrite(f"\n")
 
 
 class ExecuteDual(ConsoleWriter, CliPlural, ABC):
@@ -152,8 +134,6 @@ class ExecuteDual(ConsoleWriter, CliPlural, ABC):
                     return prompt_input
             except EOFError as e:
                 raise EOFError("EOF received. Going back to previous state.")
-            except KeyboardInterrupt:
-                self._ewrite("\nKeyboardInterrupt\n")
             except Exception as e:
                 logger.fatal(f"error: {e}")
 
@@ -190,4 +170,3 @@ class ExecuteDual(ConsoleWriter, CliPlural, ABC):
                         break  # go to next set of prompts
             except EOFError:
                 break
-        self._ewrite(f"\n")

@@ -830,7 +830,37 @@ class ShowCliStatMixin(StatShowable):
             logger.info("(statistics) %s", line)
 
 
-class RunnerTagFindNonInteractive(ExecuteSingle, RunnerNonInteractive):
+def _replace_underscore(line: str) -> str:
+    line = line.strip("\n")
+    line = line.replace("_", " ")
+    return line
+
+
+class CreateDictMixin:
+    @classmethod
+    def _create_dict(
+        cls, text: typing.TextIO, delim: str, key_idx: int, value_idx: int
+    ) -> dict[str, str]:
+        """A helper function for creating the dictionary from the CSV file."""
+        if key_idx == value_idx:
+            raise ValueError("impossible to specify the same field number")
+        if key_idx < 1 or value_idx < 1:
+            raise ValueError("field number must be 1 or more")
+        key_idx -= 1
+        value_idx -= 1
+
+        dict_: dict[str, str] = {}
+        lines = map(_replace_underscore, text.readlines())
+        try:
+            for row in map(lambda line: line.split(delim), lines):
+                dict_ |= {row[key_idx]: row[value_idx]}
+        except IndexError:
+            raise IndexError("failed to get the element of the row number")
+
+        return dict_
+
+
+class RunnerTagFindNonInteractive(ExecuteSingle, RunnerNonInteractive, CreateDictMixin):
     """Represents the runner specialized for the filtering mode."""
 
     def __init__(
@@ -857,26 +887,12 @@ class RunnerTagFindNonInteractive(ExecuteSingle, RunnerNonInteractive):
         """Import the key-value storage from a comma-separated file.
         The index starts from 1. This is because common traditional command-line
         utilities assume the field index originates from 1."""
-
-        if key_idx == value_idx:
-            raise ValueError("impossible to specify the same field number")
-        if key_idx < 1 or value_idx < 1:
-            raise ValueError("field number must be 1 or more")
-        key_idx -= 1
-        value_idx -= 1
-
-        dict_: dict[str, str] = {}
-        with text as fp:
-            try:
-                for row in map(
-                    lambda line: line.split(delim),
-                    map(lambda ln: ln.strip("\n").replace("_", " "), fp.readlines()),
-                ):
-                    dict_ |= {row[key_idx]: row[value_idx]}
-            except IndexError:
-                raise IndexError("failed to get the element of the row number")
-
-        return cls(pipeline, dict_, strategy)
+        try:
+            return cls(
+                pipeline, cls._create_dict(text, delim, key_idx, value_idx), strategy
+            )
+        except IndexError:
+            raise
 
     def _execute_single_inner(self, source: str) -> str:
         tokens = [
@@ -886,8 +902,26 @@ class RunnerTagFindNonInteractive(ExecuteSingle, RunnerNonInteractive):
         return self._pipeline.delimiter.sep_output.join(tokens)
 
 
-class RunnerTagFindInteractive(ExecuteSingle, RunnerInteractive):
+class CopyToClipboardMixin:
+    def _copy_to_clipboard(self, text: str) -> None:
+        """Check if clipboard API is available and copy to clipboard, if possible."""
+        if os.name == "nt":
+            subprocess.run(["clip.exe"], input=text.encode())
+        elif os.name == "posix":
+            if "Microsoft" in open("/proc/version").read():
+                subprocess.run(["clip.exe"], input=text.encode())
+            else:
+                subprocess.run(
+                    ["xclip", "-selection", "clipboard"], input=text.encode()
+                )
+
+
+class RunnerTagFindInteractive(
+    ExecuteSingle, RunnerInteractive, CreateDictMixin, CopyToClipboardMixin
+):
     """Represents the runner specialized for the filtering mode."""
+
+    _histfile: str
 
     def __init__(
         self,
@@ -901,7 +935,6 @@ class RunnerTagFindInteractive(ExecuteSingle, RunnerInteractive):
         self._input_strategy = strategy
         self.tags_n_count: dict[str, str] = tags_n_count
         self.tempdir = tempdir
-        self._histfile = ""
         self._use_clipboard = use_clipboard
 
     @classmethod
@@ -918,62 +951,38 @@ class RunnerTagFindInteractive(ExecuteSingle, RunnerInteractive):
     ) -> Self:
         """Import the key-value storage from a comma-separated file.
         The index starts from 1. This is because common traditional command-line
-        utilities assume the field index originates from 1."""
+        utilities assume the field index originates from 1.
 
-        if key_idx == value_idx:
-            raise ValueError("impossible to specify the same field number")
-        if key_idx < 1 or value_idx < 1:
-            raise ValueError("field number must be 1 or more")
-        key_idx -= 1
-        value_idx -= 1
-
-        dict_: dict[str, str] = {}
-
-        def _replace_underscore(line: str) -> str:
-            return line.strip("\n").replace("_", " ")
-
-        with text as fp:
-            try:
-                for row in map(
-                    lambda line: line.split(delim),
-                    map(_replace_underscore, fp.readlines()),
-                ):
-                    dict_ |= {row[key_idx]: row[value_idx]}
-            except IndexError:
-                raise IndexError("failed to get the element of the row number")
-
-        return cls(pipeline, dict_, strategy, tempdir, use_clipboard)
+        The `tempdir` is used to store the history file for the GNU Readline.
+        """
+        try:
+            return cls(
+                pipeline,
+                cls._create_dict(text, delim, key_idx, value_idx),
+                strategy,
+                tempdir,
+                use_clipboard,
+            )
+        except IndexError:
+            raise
 
     def _on_init(self) -> None:
-        histfile = None
-        with tempfile.NamedTemporaryFile(delete=False, dir=self.tempdir) as fp:
-            histfile = fp.name
-            for key in self.tags_n_count.keys():
-                fp.write(f"{key}\n".encode())
-
-        # so that the file is deleted after the program exits
-        self._histfile = histfile
+        fp = tempfile.NamedTemporaryFile(delete=False, dir=self.tempdir)
+        for key in self.tags_n_count.keys():
+            fp.write(f"{key}\n".encode())
+        histfile = fp.name
+        fp.close()
 
         try:
             readline.read_history_file(histfile)
         except FileNotFoundError:
             logger.exception(f"failed to read history file: {histfile}")
+        # so that the file is deleted after the program exits
+        self._histfile = histfile
 
     def _on_exit(self) -> None:
         if self._histfile:
             os.remove(self._histfile)
-
-    def _copy_to_clipboard(self, text: str) -> None:
-        """Check if clipboard API is available and copy to clipboard, if possible."""
-        if os.name == "nt":
-            subprocess.run(["clip.exe"], input=text.encode())
-        elif os.name == "posix":
-            if "Microsoft" in open("/proc/version").read():
-                subprocess.run(["clip.exe"], input=text.encode())
-            else:
-                subprocess.run(
-                    ["xclip", "-selection", "clipboard"], input=text.encode()
-                )
 
     def _execute_single_inner(self, source: str) -> str:
         tokens = [

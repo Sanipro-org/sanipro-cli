@@ -13,7 +13,7 @@ class InputStrategy(ABC):
     in interactive mode."""
 
     @abstractmethod
-    def input(self, prompt: str = "") -> str:
+    def input(self) -> str:
         """Get a user input."""
 
 

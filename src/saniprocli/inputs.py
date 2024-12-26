@@ -1,8 +1,12 @@
+import logging
 import sys
 
 from saniprocli.abc import InputStrategy
+from saniprocli.console import ConsoleWriter
 
 from .color import style_for_readline
+
+logger = logging.getLogger(__name__)
 
 
 def input_last_break(prompt: str = "") -> str:
@@ -12,32 +16,32 @@ def input_last_break(prompt: str = "") -> str:
     Once i thought it is posssible to handle it by sys.stdin,
     and .read(), but realized without using input(),
     it is hard to use the readline library."""
-    return "%s\n" % (input(prompt),)
+    txt = input(prompt)
+    if txt != "":
+        return "%s\n" % (txt,)
+    return txt
 
 
 class DirectInputStrategy(InputStrategy):
     """Calles sys.stdin.readline() to get a user input."""
 
-    def input(self, prompt: str = "") -> str:
-        buffer = []
-
+    def input(self) -> str:
+        """Preserves line breaks."""
+        bufs = []
         while True:
             try:
-                line = input(prompt)
-                buffer.append(line)
+                chunk = sys.stdin.readline()
+                if chunk == "":  # EOF
+                    if bufs:  # If there is any buffered input, return it
+                        return "".join(bufs)
+                    else:
+                        raise EOFError
+                bufs.append(chunk)
             except KeyboardInterrupt:
-                sys.stderr.write("^C")
-                raise EOFError
-            except EOFError:
-                if buffer:
-                    break
-                else:
-                    raise
-
-        return "".join(buffer)
+                exit(1)
 
 
-class OnelineInputStrategy(InputStrategy):
+class OnelineInputStrategy(InputStrategy, ConsoleWriter):
     """Represents the method to get a user input per prompt
     in interactive mode.
     It consumes just one line to get the input by a user."""
@@ -49,13 +53,16 @@ class OnelineInputStrategy(InputStrategy):
     def __repr__(self) -> str:
         return f"{type(self).__name__}(ps1={self.ps1})"
 
-    def input(self, prompt: str = "") -> str:
-        if prompt == "":
-            prompt = self.ps1
-        return input_last_break(style_for_readline(prompt))
+    def input(self) -> str:
+        prompt = self.ps1
+        try:
+            return input_last_break(style_for_readline(prompt))
+        except KeyboardInterrupt:
+            self._ewrite("\nKeyboardInterrupt\n")
+            return ""
 
 
-class MultipleInputStrategy(InputStrategy):
+class MultipleInputStrategy(InputStrategy, ConsoleWriter):
     """Represents the method to get a user input per prompt
     in interactive mode.
 
@@ -75,20 +82,21 @@ class MultipleInputStrategy(InputStrategy):
     def __repr__(self) -> str:
         return f"{type(self).__name__}(ps1={self.ps1}, ps2={self.ps2})"
 
-    def input(self, prompt: str = "") -> str:
+    def input(self) -> str:
         buffer = []
-        _prompt = ""
-        if prompt != "":
-            self.ps1 = prompt
-            self.ps2 = prompt
-        else:
-            _prompt = self.ps1
+        _current_prompt = self.ps1
+        _initial_prompt = _current_prompt
 
         while True:
             try:
-                line = input_last_break(style_for_readline(_prompt))
+                line = input_last_break(style_for_readline(_current_prompt))
                 buffer.append(line)
-                _prompt = self.ps2
+                _current_prompt = self.ps2
+            except KeyboardInterrupt:
+                self._ewrite("\nKeyboardInterrupt\n")
+                buffer.clear()
+                # restore initial prompt
+                _current_prompt = _initial_prompt
             except EOFError:
                 if buffer:
                     sys.stdout.write("\n")
