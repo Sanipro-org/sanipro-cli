@@ -11,7 +11,7 @@ from saniprocli.console import ConsoleWriter
 
 logger_root = logging.getLogger()
 
-logger = logging.getLogger(__name__)
+from sanipro.logger import logger
 
 
 class BannerMixin(ConsoleWriter):

@@ -1,12 +1,9 @@
-import logging
 import sys
 
 from saniprocli.abc import InputStrategy
 from saniprocli.console import ConsoleWriter
 
 from .color import style_for_readline
-
-logger = logging.getLogger(__name__)
 
 
 def input_last_break(prompt: str = "") -> str:

@@ -78,7 +78,7 @@ logging.basicConfig(
 
 logger_root = logging.getLogger()
 
-logger = logging.getLogger(__name__)
+from sanipro.logger import logger
 
 
 class CmdModuleTuple(NamedTuple):

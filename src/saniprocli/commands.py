@@ -19,8 +19,6 @@ from .logger import get_log_level_from
 
 logger_root = logging.getLogger()
 
-logger = logging.getLogger(__name__)
-
 
 class CliArgsNamespaceDefault(HasPrettyRepr, ParserAppendable, SubParserAppendable):
     """Default namespace for the argparser."""

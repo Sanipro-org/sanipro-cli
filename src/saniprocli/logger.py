@@ -1,7 +1,7 @@
 import logging
 import typing
 
-logger = logging.getLogger(__name__)
+from sanipro.logger import logger
 
 
 class BufferingLoggerWriter(typing.IO):

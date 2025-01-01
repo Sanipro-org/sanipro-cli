@@ -1,10 +1,7 @@
 import functools
-import logging
 import re
 
 import click
-
-logger = logging.getLogger(__name__)
 
 color_foreground = "cyan"
 
