@@ -1,9 +1,17 @@
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: debug-statements
+
   - repo: https://github.com/pycqa/autoflake
     rev: v2.3.1
     hooks:
       - id: autoflake
-        args: 
+        args:
           - --in-place
           - --remove-all-unused-imports
 
@@ -13,9 +21,9 @@ repos:
       - id: isort
 
   - repo: https://github.com/psf/black-pre-commit-mirror
-    rev: 24.10.0 
+    rev: 24.10.0
     hooks:
       - id: black
         language_version: python3.12
-        args: 
+        args:
           - --skip-magic-trailing-comma
