@@ -97,7 +97,7 @@ class ExecuteSingle(ConsoleWriter, CliSingular, ABC):
                     if prompt_input:
                         out = self._execute_single(prompt_input)
                         self._write(f"{out}\n")
-                except EOFError as e:
+                except EOFError:
                     break
             except Exception as e:  # like unclosed parentheses
                 logger.fatal(f"error: {e}")
@@ -132,7 +132,7 @@ class ExecuteDual(ConsoleWriter, CliPlural, ABC):
                 prompt_input = self._input_strategy.input()
                 if prompt_input:
                     return prompt_input
-            except EOFError as e:
+            except EOFError:
                 raise EOFError("EOF received. Going back to previous state.")
             except Exception as e:
                 logger.fatal(f"error: {e}")
