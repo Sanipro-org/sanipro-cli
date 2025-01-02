@@ -15,5 +15,5 @@ pyperclip = "^1.9.0"
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
-[tool.poetry.scripts]
-lint = "lint:main"
+[tool.isort]
+profile = "black"
