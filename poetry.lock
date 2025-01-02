@@ -45,6 +45,16 @@ extra = ["lxml (>=4.6)", "pydot (>=3.0.1)", "pygraphviz (>=1.14)", "sympy (>=1.1
 test = ["pytest (>=7.2)", "pytest-cov (>=4.0)"]
 
 [[package]]
+name = "pyperclip"
+version = "1.9.0"
+description = "A cross-platform clipboard module for Python. (Only handles plain text for now.)"
+optional = false
+python-versions = "*"
+files = [
+    {file = "pyperclip-1.9.0.tar.gz", hash = "sha256:b7de0142ddc81bfc5c7507eea19da920b92252b548b96186caf94a5e2527d310"},
+]
+
+[[package]]
 name = "sanipro"
 version = "0.1.0"
 description = "Sanitizes prompts."
@@ -75,4 +85,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "d47e468d9b13998f438615748624074803e0502f6f88dfb834ecdb34233d32fb"
+content-hash = "c37a1545c432672e05f4b115c6fbb42e9dae8d19a19a0e225c70c90ff072a074"

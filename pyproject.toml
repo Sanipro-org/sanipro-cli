@@ -9,6 +9,7 @@ readme = "README.md"
 python = "^3.10"
 sanipro = {path = "../lib", develop = true}
 click = "^8.1.7"
+pyperclip = "^1.9.0"
 
 [build-system]
 requires = ["poetry-core"]

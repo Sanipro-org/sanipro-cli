@@ -5,7 +5,6 @@ import logging
 import os
 import pprint
 import readline
-import subprocess
 import sys
 import tempfile
 import typing
@@ -14,7 +13,8 @@ from collections.abc import Callable, Sequence
 from functools import partial
 from typing import NamedTuple
 
-from sanipro.abc import MutablePrompt, Prompt
+import pyperclip
+from sanipro.abc import IPromptTokenizer, MutablePrompt, Prompt
 from sanipro.compatible import Self
 from sanipro.delimiter import Delimiter
 from sanipro.diff import PromptDifferenceDetector
@@ -43,6 +43,7 @@ from sanipro.filters.utils import (
     sort_by_weight,
     sort_lexicographically,
 )
+from sanipro.logger import logger
 from sanipro.parser import (
     DummyParser,
     ParserInterface,
@@ -52,11 +53,12 @@ from sanipro.parser import (
     TokenNonInteractive,
 )
 from sanipro.pipeline import PromptPipeline, PromptPipelineV1, PromptPipelineV2
+from sanipro.pipelineresult import PipelineResult
 from sanipro.promptset import SetCalculatorWrapper
 from sanipro.tokenizer import PromptTokenizer, PromptTokenizerV1, PromptTokenizerV2
 
 from saniprocli import cli_hooks, inputs
-from saniprocli.abc import CliRunnable, InputStrategy, StatShowable
+from saniprocli.abc import CliRunnable, InputStrategy
 from saniprocli.cli_runner import (
     ExecuteDual,
     ExecuteSingle,
@@ -77,8 +79,6 @@ logging.basicConfig(
 )
 
 logger_root = logging.getLogger()
-
-from sanipro.logger import logger
 
 
 class CmdModuleTuple(NamedTuple):
@@ -622,6 +622,14 @@ class CliSubcommandFilter(SubparserInjectable):
             required=True,
         )
 
+        parser.add_argument(
+            "-c",
+            "--clipboard",
+            default=False,
+            action="store_true",
+            help="Copy the result to the clipboard if possible.",
+        )
+
         for cmd in cls.filter_classes:
             cmd.inject_subparser(subparser)
 
@@ -654,6 +662,14 @@ class CliSubcommandSetOperation(SubparserInjectable):
                 "Provides the REPL interface to play with prompts. "
                 "The program behaves like the Python interpreter."
             ),
+        )
+
+        parser.add_argument(
+            "-c",
+            "--clipboard",
+            default=False,
+            action="store_true",
+            help="Copy the result to the clipboard if possible.",
         )
 
         subparser = parser.add_subparsers(
@@ -710,6 +726,14 @@ class CliSubcommandParserV2(SubparserInjectable):
                 "Provides the REPL interface to play with prompts. "
                 "The program behaves like the Python interpreter."
             ),
+        )
+
+        parser.add_argument(
+            "-c",
+            "--clipboard",
+            default=False,
+            action="store_true",
+            help="Copy the result to the clipboard if possible.",
         )
 
 
@@ -819,27 +843,35 @@ def prepare_readline() -> None:
     atexit.register(save, h_len, histfile)
 
 
-class ShowCliStatMixin(StatShowable):
-    def _show_cli_stat(
-        self,
-        detector: type[PromptDifferenceDetector],
-        before: MutablePrompt,
-        after: MutablePrompt,
-    ) -> None:
-        for line in detector(before, after).get_summary():
+class ClipboardHandler:
+    @staticmethod
+    def copy_to_clipboard(text: str) -> None:
+        """Copy the text to clipboard."""
+        try:
+            pyperclip.copy(text)
+        except pyperclip.PyperclipException as e:
+            logger.warning(e)
+
+
+class StatisticsHandler:
+    @staticmethod
+    def show_cli_stat(result: PipelineResult) -> None:
+        """Explains what has changed in the unprocessed/processsed prompts."""
+
+        for line in result.get_summary():
             logger.info("(statistics) %s", line)
 
 
-def _replace_underscore(line: str) -> str:
+def replace_underscore(line: str) -> str:
     line = line.strip("\n")
     line = line.replace("_", " ")
     return line
 
 
-class CreateDictMixin:
-    @classmethod
-    def _create_dict(
-        cls, text: typing.TextIO, delim: str, key_idx: int, value_idx: int
+class CsvUtils:
+    @staticmethod
+    def create_dict(
+        text: typing.TextIO, delim: str, key_idx: int, value_idx: int
     ) -> dict[str, str]:
         """A helper function for creating the dictionary from the CSV file."""
         if key_idx == value_idx:
@@ -850,7 +882,7 @@ class CreateDictMixin:
         value_idx -= 1
 
         dict_: dict[str, str] = {}
-        lines = map(_replace_underscore, text.readlines())
+        lines = map(replace_underscore, text.readlines())
         try:
             for row in map(lambda line: line.split(delim), lines):
                 dict_ |= {row[key_idx]: row[value_idx]}
@@ -860,7 +892,7 @@ class CreateDictMixin:
         return dict_
 
 
-class RunnerTagFindNonInteractive(ExecuteSingle, RunnerNonInteractive, CreateDictMixin):
+class RunnerTagFindNonInteractive(ExecuteSingle, RunnerNonInteractive):
     """Represents the runner specialized for the filtering mode."""
 
     def __init__(
@@ -889,7 +921,9 @@ class RunnerTagFindNonInteractive(ExecuteSingle, RunnerNonInteractive, CreateDic
         utilities assume the field index originates from 1."""
         try:
             return cls(
-                pipeline, cls._create_dict(text, delim, key_idx, value_idx), strategy
+                pipeline,
+                CsvUtils.create_dict(text, delim, key_idx, value_idx),
+                strategy,
             )
         except IndexError:
             raise
@@ -902,23 +936,7 @@ class RunnerTagFindNonInteractive(ExecuteSingle, RunnerNonInteractive, CreateDic
         return self._pipeline.delimiter.sep_output.join(tokens)
 
 
-class CopyToClipboardMixin:
-    def _copy_to_clipboard(self, text: str) -> None:
-        """Check if clipboard API is available and copy to clipboard, if possible."""
-        if os.name == "nt":
-            subprocess.run(["clip.exe"], input=text.encode())
-        elif os.name == "posix":
-            if "Microsoft" in open("/proc/version").read():
-                subprocess.run(["clip.exe"], input=text.encode())
-            else:
-                subprocess.run(
-                    ["xclip", "-selection", "clipboard"], input=text.encode()
-                )
-
-
-class RunnerTagFindInteractive(
-    ExecuteSingle, RunnerInteractive, CreateDictMixin, CopyToClipboardMixin
-):
+class RunnerTagFindInteractive(ExecuteSingle, RunnerInteractive):
     """Represents the runner specialized for the filtering mode."""
 
     _histfile: str
@@ -929,7 +947,7 @@ class RunnerTagFindInteractive(
         tags_n_count: dict[str, str],
         strategy: InputStrategy,
         tempdir: str,
-        use_clipboard: bool = False,
+        use_clipboard: bool,
     ) -> None:
         self._pipeline = pipeline
         self._input_strategy = strategy
@@ -958,7 +976,7 @@ class RunnerTagFindInteractive(
         try:
             return cls(
                 pipeline,
-                cls._create_dict(text, delim, key_idx, value_idx),
+                CsvUtils.create_dict(text, delim, key_idx, value_idx),
                 strategy,
                 tempdir,
                 use_clipboard,
@@ -992,17 +1010,12 @@ class RunnerTagFindInteractive(
         selialized = self._pipeline.delimiter.sep_output.join(tokens)
 
         if self._use_clipboard:
-            try:
-                self._copy_to_clipboard(selialized)
-            except subprocess.SubprocessError:
-                logger.error("failed to copy to clipboard")
-            except FileNotFoundError:
-                logger.debug("clipboard API is not available")
+            ClipboardHandler.copy_to_clipboard(selialized)
 
         return selialized
 
 
-class RunnerFilterInteractive(ExecuteSingle, ShowCliStatMixin, RunnerInteractive):
+class RunnerFilterInteractive(ExecuteSingle, RunnerInteractive):
     """Represents the runner specialized for the filtering mode."""
 
     def __init__(
@@ -1010,20 +1023,24 @@ class RunnerFilterInteractive(ExecuteSingle, ShowCliStatMixin, RunnerInteractive
         pipeline: PromptPipeline,
         strategy: InputStrategy,
         detector: type[PromptDifferenceDetector],
+        use_clipboard: bool,
     ) -> None:
         self._pipeline = pipeline
         self._token_cls = pipeline.token_cls
         self._input_strategy = strategy
 
         self._detector_cls = detector
+        self._use_clipboard = use_clipboard
 
     def _execute_single_inner(self, source: str) -> str:
-        unparsed = self._pipeline.tokenize(source)
-        parsed = self._pipeline.execute(source)
-
-        self._show_cli_stat(self._detector_cls, unparsed, parsed)
+        result = self._pipeline.execute(source)
+        StatisticsHandler.show_cli_stat(result)
 
         selialized = str(self._pipeline)
+
+        if self._use_clipboard:
+            ClipboardHandler.copy_to_clipboard(selialized)
+
         return selialized
 
 
@@ -1040,9 +1057,7 @@ class RunnerFilterNonInteractive(ExecuteSingle, RunnerNonInteractive):
         return str(self._pipeline)
 
 
-class RunnerSetOperationInteractiveDual(
-    ExecuteDual, ShowCliStatMixin, RunnerInteractive
-):
+class RunnerSetOperationInteractiveDual(ExecuteDual, RunnerInteractive):
     """Represents the runner specialized for the set operation.
 
     In set operation mode, the total number of tokens will be more
@@ -1051,81 +1066,93 @@ class RunnerSetOperationInteractiveDual(
 
     def __init__(
         self,
-        pipeline: PromptPipeline,
+        tokenizer: IPromptTokenizer,
         strategy: InputStrategy,
         calculator: SetCalculatorWrapper,
         detector: type[PromptDifferenceDetector],
+        use_clipboard: bool,
     ) -> None:
-        self._pipeline = pipeline
-        self._token_cls = pipeline.token_cls
+        self._tokenizer = tokenizer
         self._input_strategy = strategy
 
         self._calculator = calculator
         self._detector_cls = detector
+        self._use_clipboard = use_clipboard
 
     def _execute_multi_inner(self, first: str, second: str) -> str:
-        prompt_first_before = self._pipeline.tokenize(first)
-        prompt_second_before = self._pipeline.tokenize(second)
+        prompt_first_before = self._tokenizer.tokenize_prompt(first)
+        prompt_second_before = self._tokenizer.tokenize_prompt(second)
 
         prompt = [
-            self._token_cls(name=x.name, weight=x.weight)
+            self._tokenizer.token_cls(name=x.name, weight=x.weight)
             for x in self._calculator.do_math(prompt_first_before, prompt_second_before)
         ]
 
         logger.info("(statistics) prompt A <> result")
-        self._show_cli_stat(self._detector_cls, prompt_first_before, prompt)
-        logger.info("(statistics) prompt B <> result")
-        self._show_cli_stat(self._detector_cls, prompt_second_before, prompt)
+        StatisticsHandler.show_cli_stat(PipelineResult(prompt_first_before, prompt))
 
-        selialized = self._pipeline.delimiter.sep_output.join(
+        logger.info("(statistics) prompt B <> result")
+        StatisticsHandler.show_cli_stat(PipelineResult(prompt_second_before, prompt))
+
+        selialized = self._tokenizer.delimiter.sep_output.join(
             str(token) for token in prompt
         )
+
+        if self._use_clipboard:
+            ClipboardHandler.copy_to_clipboard(selialized)
+
         return selialized
 
 
-class RunnerSetOperationIteractiveMono(
-    ExecuteSingle, ShowCliStatMixin, RunnerNonInteractive
-):
+class RunnerSetOperationIteractiveMono(ExecuteSingle, RunnerNonInteractive):
 
     def __init__(
         self,
-        pipeline: PromptPipeline,
+        tokenizer: IPromptTokenizer,
         strategy: InputStrategy,
         calculator: SetCalculatorWrapper,
         detector: type[PromptDifferenceDetector],
         fixed_prompt: MutablePrompt,
+        use_clipboard: bool,
     ) -> None:
-        self._pipeline = pipeline
-        self._token_cls = pipeline.token_cls
+        self._tokenizer = tokenizer
         self._input_strategy = strategy
 
         self._calculator = calculator
         self._detector_cls = detector
         self._fixed_prompt = fixed_prompt
+        self._use_clipboard = use_clipboard
 
     @classmethod
     def create_from_text(
         cls,
-        pipeline: PromptPipeline,
+        tokenizer: IPromptTokenizer,
         strategy: InputStrategy,
         calculator: SetCalculatorWrapper,
         detector: type[PromptDifferenceDetector],
         text: typing.TextIO,
+        use_clipboard: bool,
     ) -> Self:
-        fixed_prompt = pipeline.tokenize(text.read())
-        return cls(pipeline, strategy, calculator, detector, fixed_prompt)
+        fixed_prompt = tokenizer.tokenize_prompt(text.read())
+        return cls(
+            tokenizer, strategy, calculator, detector, fixed_prompt, use_clipboard
+        )
 
     def _execute_single_inner(self, source: str) -> str:
-        prompt_second_before = self._pipeline.tokenize(source)
+        prompt_second_before = self._tokenizer.tokenize_prompt(source)
 
         prompt = [
-            self._token_cls(name=x.name, weight=x.weight)
+            self._tokenizer.token_cls(name=x.name, weight=x.weight)
             for x in self._calculator.do_math(self._fixed_prompt, prompt_second_before)
         ]
 
-        selialized = self._pipeline.delimiter.sep_output.join(
+        selialized = self._tokenizer.delimiter.sep_output.join(
             str(token) for token in prompt
         )
+
+        if self._use_clipboard:
+            ClipboardHandler.copy_to_clipboard(selialized)
+
         return selialized
 
 
@@ -1193,22 +1220,27 @@ class CliCommandsDemo(CliCommands):
         if self._args.is_filter() or self._args.is_parser_v2():
             if self._args.interactive:
                 return RunnerFilterInteractive(
-                    pipe, input_strategy, PromptDifferenceDetector
+                    pipe, input_strategy, PromptDifferenceDetector, self._args.clipboard
                 )
             return RunnerFilterNonInteractive(pipe, input_strategy)
         elif self._args.is_set_operation():
             calculator = SetCalculatorWrapper.create_from(self._args.set_op_id)
             if self._args.interactive:
                 return RunnerSetOperationInteractiveDual(
-                    pipe, input_strategy, calculator, PromptDifferenceDetector
+                    pipe.tokenizer,
+                    input_strategy,
+                    calculator,
+                    PromptDifferenceDetector,
+                    self._args.clipboard,
                 )
             else:
                 return RunnerSetOperationIteractiveMono.create_from_text(
-                    pipe,
+                    pipe.tokenizer,
                     input_strategy,
                     calculator,
                     PromptDifferenceDetector,
                     self._args.fixed_prompt,
+                    self._args.clipboard,
                 )
         elif self._args.is_tfind():
             if self._args.interactive:
@@ -1283,8 +1315,6 @@ def app():
 
         runner = cli_commands.to_runner()
         runner.run()
-    except Exception as e:
-        logger.exception(f"error: {e}")
     finally:
         sys.exit(1)
 

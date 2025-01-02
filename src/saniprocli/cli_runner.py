@@ -99,7 +99,7 @@ class ExecuteSingle(ConsoleWriter, CliSingular, ABC):
                         self._write(f"{out}\n")
                 except EOFError as e:
                     break
-            except ValueError as e:  # like unclosed parentheses
+            except Exception as e:  # like unclosed parentheses
                 logger.fatal(f"error: {e}")
 
 

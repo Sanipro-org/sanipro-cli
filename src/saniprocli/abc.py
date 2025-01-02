@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 
-from sanipro.abc import IPromptPipeline, MutablePrompt
-from sanipro.diff import PromptDifferenceDetector
+from sanipro.abc import IPromptPipeline
 from sanipro.pipeline import PromptPipeline
 from sanipro.promptset import SetCalculatorWrapper
 
@@ -24,17 +23,6 @@ class CliRunnable(ABC):
     @abstractmethod
     def run(self):
         """Start processing."""
-
-
-class StatShowable(ABC):
-    @abstractmethod
-    def _show_cli_stat(
-        self,
-        detector: type[PromptDifferenceDetector],
-        before: MutablePrompt,
-        after: MutablePrompt,
-    ) -> None:
-        """Explains what has changed in the unprocessed/processsed prompts."""
 
 
 class CliSingular(ABC):
