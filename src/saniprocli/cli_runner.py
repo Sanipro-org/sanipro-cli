@@ -3,6 +3,7 @@ import time
 from abc import ABC, abstractmethod
 
 from sanipro.abc import IPromptPipeline
+from sanipro.logger import logger
 from sanipro.promptset import SetCalculatorWrapper
 
 from saniprocli import cli_hooks, color
@@ -10,8 +11,6 @@ from saniprocli.abc import CliPlural, CliRunnable, CliSingular, InputStrategy
 from saniprocli.console import ConsoleWriter
 
 logger_root = logging.getLogger()
-
-from sanipro.logger import logger
 
 
 class BannerMixin(ConsoleWriter):
@@ -77,11 +76,8 @@ class ExecuteSingle(ConsoleWriter, CliSingular, ABC):
     """Represents the runner with the interactive user interface
     that expects a single input of the prompt."""
 
-    def __init__(self, pipeline: IPromptPipeline, strategy: InputStrategy) -> None:
-        self._pipeline = pipeline
-        self._tokenizer = pipeline.tokenizer
-        self._token_cls = pipeline.tokenizer.token_cls
-        self._input_strategy = strategy
+    _pipeline: IPromptPipeline
+    _input_strategy: InputStrategy
 
     @abstractmethod
     def _execute_single_inner(self, source: str) -> str:
@@ -109,18 +105,9 @@ class ExecuteDual(ConsoleWriter, CliPlural, ABC):
     """Represents the runner with the interactive user interface
     that expects two different prompts."""
 
-    def __init__(
-        self,
-        pipeline: IPromptPipeline,
-        strategy: InputStrategy,
-        calculator: SetCalculatorWrapper,
-    ) -> None:
-        self._pipeline = pipeline
-        self._tokenizer = pipeline.tokenizer
-        self._token_cls = pipeline.tokenizer.token_cls
-        self._input_strategy = strategy
-
-        self._calculator = calculator
+    _pipeline: IPromptPipeline
+    _input_strategy: InputStrategy
+    _calculator: SetCalculatorWrapper
 
     @abstractmethod
     def _execute_multi_inner(self, first: str, second: str) -> str:

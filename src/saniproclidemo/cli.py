@@ -896,6 +896,7 @@ class RunnerTagFindNonInteractive(ExecuteSingle, RunnerNonInteractive):
         strategy: InputStrategy,
     ) -> None:
         self._pipeline = pipeline
+        self._tokenizer = pipeline.tokenizer
         self._input_strategy = strategy
         self.tags_n_count: dict[str, str] = tags_n_count
         self._histfile = ""
@@ -944,6 +945,7 @@ class RunnerTagFindInteractive(ExecuteSingle, RunnerInteractive):
         use_clipboard: bool,
     ) -> None:
         self._pipeline = pipeline
+        self._tokenizer = pipeline.tokenizer
         self._input_strategy = strategy
         self.tags_n_count: dict[str, str] = tags_n_count
         self.tempdir = tempdir
