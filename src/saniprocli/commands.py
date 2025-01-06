@@ -2,8 +2,8 @@ import logging
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 
+from sanipro.abc import IPromptPipeline
 from sanipro.compatible import Self
-from sanipro.pipeline import PromptPipeline
 from sanipro.utils import HasPrettyRepr
 
 from saniprocli.abc import (
@@ -145,5 +145,5 @@ class CliCommands(PipelineGettable, ABC):
 
         Instantiated instance will be switched by the command option."""
 
-    def _get_pipeline(self) -> PromptPipeline:
+    def _get_pipeline(self) -> IPromptPipeline:
         raise NotImplementedError

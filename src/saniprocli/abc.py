@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 
 from sanipro.abc import IPromptPipeline
-from sanipro.pipeline import PromptPipeline
 from sanipro.promptset import SetCalculatorWrapper
 
 from saniprocli.sanipro_argparse import SaniproArgumentParser
@@ -91,7 +90,7 @@ class PipelineGettable(ABC):
     """Represents user-defined pipeline."""
 
     @abstractmethod
-    def _get_pipeline(self) -> PromptPipeline:
+    def _get_pipeline(self) -> IPromptPipeline:
         """Gets user-defined pipeline."""
 
 

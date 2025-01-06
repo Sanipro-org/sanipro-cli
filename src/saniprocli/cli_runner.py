@@ -2,7 +2,7 @@ import logging
 import time
 from abc import ABC, abstractmethod
 
-from sanipro.pipeline import PromptPipeline
+from sanipro.abc import IPromptPipeline
 from sanipro.promptset import SetCalculatorWrapper
 
 from saniprocli import cli_hooks, color
@@ -77,9 +77,10 @@ class ExecuteSingle(ConsoleWriter, CliSingular, ABC):
     """Represents the runner with the interactive user interface
     that expects a single input of the prompt."""
 
-    def __init__(self, pipeline: PromptPipeline, strategy: InputStrategy) -> None:
+    def __init__(self, pipeline: IPromptPipeline, strategy: InputStrategy) -> None:
         self._pipeline = pipeline
-        self._token_cls = pipeline.token_cls
+        self._tokenizer = pipeline.tokenizer
+        self._token_cls = pipeline.tokenizer.token_cls
         self._input_strategy = strategy
 
     @abstractmethod
@@ -96,7 +97,8 @@ class ExecuteSingle(ConsoleWriter, CliSingular, ABC):
                     prompt_input = self._input_strategy.input()
                     if prompt_input:
                         out = self._execute_single(prompt_input)
-                        self._write(f"{out}\n")
+                        if out:
+                            self._write(f"{out}\n")
                 except EOFError:
                     break
             except Exception as e:  # like unclosed parentheses
@@ -109,12 +111,13 @@ class ExecuteDual(ConsoleWriter, CliPlural, ABC):
 
     def __init__(
         self,
-        pipeline: PromptPipeline,
+        pipeline: IPromptPipeline,
         strategy: InputStrategy,
         calculator: SetCalculatorWrapper,
     ) -> None:
         self._pipeline = pipeline
-        self._token_cls = pipeline.token_cls
+        self._tokenizer = pipeline.tokenizer
+        self._token_cls = pipeline.tokenizer.token_cls
         self._input_strategy = strategy
 
         self._calculator = calculator
@@ -165,7 +168,8 @@ class ExecuteDual(ConsoleWriter, CliPlural, ABC):
                             continue
                     elif state == 20:
                         out = self._execute_multi(first, second)
-                        self._write(f"{out}\n")
+                        if out:
+                            self._write(f"{out}\n")
                         color.color_foreground = _color
                         break  # go to next set of prompts
             except EOFError:

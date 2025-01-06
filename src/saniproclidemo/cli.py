@@ -14,7 +14,7 @@ from functools import partial
 from typing import NamedTuple
 
 import pyperclip
-from sanipro.abc import IPromptTokenizer, MutablePrompt, Prompt
+from sanipro.abc import IPipelineResult, IPromptPipeline, MutablePrompt, Prompt
 from sanipro.compatible import Self
 from sanipro.delimiter import Delimiter
 from sanipro.diff import PromptDifferenceDetector
@@ -44,18 +44,12 @@ from sanipro.filters.utils import (
     sort_lexicographically,
 )
 from sanipro.logger import logger
-from sanipro.parser import (
-    DummyParser,
-    ParserInterface,
-    ParserV1,
-    ParserV2,
-    TokenInteractive,
-    TokenNonInteractive,
-)
-from sanipro.pipeline import PromptPipeline, PromptPipelineV1, PromptPipelineV2
+from sanipro.parser import DummyParser
+from sanipro.pipeline_v1 import ParserV1, PromptPipelineV1, PromptTokenizerV1
+from sanipro.pipeline_v2 import ParserV2, PromptPipelineV2, PromptTokenizerV2
 from sanipro.pipelineresult import PipelineResult
 from sanipro.promptset import SetCalculatorWrapper
-from sanipro.tokenizer import PromptTokenizer, PromptTokenizerV1, PromptTokenizerV2
+from sanipro.token import TokenInteractive, TokenNonInteractive
 
 from saniprocli import cli_hooks, inputs
 from saniprocli.abc import CliRunnable, InputStrategy
@@ -855,7 +849,7 @@ class ClipboardHandler:
 
 class StatisticsHandler:
     @staticmethod
-    def show_cli_stat(result: PipelineResult) -> None:
+    def show_cli_stat(result: IPipelineResult) -> None:
         """Explains what has changed in the unprocessed/processsed prompts."""
 
         for line in result.get_summary():
@@ -897,7 +891,7 @@ class RunnerTagFindNonInteractive(ExecuteSingle, RunnerNonInteractive):
 
     def __init__(
         self,
-        pipeline: PromptPipeline,
+        pipeline: IPromptPipeline,
         tags_n_count: dict[str, str],
         strategy: InputStrategy,
     ) -> None:
@@ -909,7 +903,7 @@ class RunnerTagFindNonInteractive(ExecuteSingle, RunnerNonInteractive):
     @classmethod
     def create_from_csv(
         cls,
-        pipeline: PromptPipeline,
+        pipeline: IPromptPipeline,
         text: typing.TextIO,
         strategy: InputStrategy,
         delim: str,
@@ -931,7 +925,7 @@ class RunnerTagFindNonInteractive(ExecuteSingle, RunnerNonInteractive):
     def _execute_single_inner(self, source: str) -> str:
         tokens = [
             "%s\t%s" % (str(token), self.tags_n_count.get(token.name, "null"))
-            for token in self._pipeline.tokenize(source)
+            for token in self._tokenizer.tokenize_prompt(source)
         ]
         return self._pipeline.delimiter.sep_output.join(tokens)
 
@@ -943,7 +937,7 @@ class RunnerTagFindInteractive(ExecuteSingle, RunnerInteractive):
 
     def __init__(
         self,
-        pipeline: PromptPipeline,
+        pipeline: IPromptPipeline,
         tags_n_count: dict[str, str],
         strategy: InputStrategy,
         tempdir: str,
@@ -958,7 +952,7 @@ class RunnerTagFindInteractive(ExecuteSingle, RunnerInteractive):
     @classmethod
     def create_from_csv(
         cls,
-        pipeline: PromptPipeline,
+        pipeline: IPromptPipeline,
         text: typing.TextIO,
         strategy: InputStrategy,
         delim: str,
@@ -1005,7 +999,7 @@ class RunnerTagFindInteractive(ExecuteSingle, RunnerInteractive):
     def _execute_single_inner(self, source: str) -> str:
         tokens = [
             "%s\t%s" % (str(token), self.tags_n_count.get(token.name, "null"))
-            for token in self._pipeline.tokenize(source)
+            for token in self._tokenizer.tokenize_prompt(source)
         ]
         selialized = self._pipeline.delimiter.sep_output.join(tokens)
 
@@ -1020,13 +1014,13 @@ class RunnerFilterInteractive(ExecuteSingle, RunnerInteractive):
 
     def __init__(
         self,
-        pipeline: PromptPipeline,
+        pipeline: IPromptPipeline,
         strategy: InputStrategy,
         detector: type[PromptDifferenceDetector],
         use_clipboard: bool,
     ) -> None:
         self._pipeline = pipeline
-        self._token_cls = pipeline.token_cls
+        self._token_cls = pipeline.tokenizer.token_cls
         self._input_strategy = strategy
 
         self._detector_cls = detector
@@ -1047,9 +1041,9 @@ class RunnerFilterInteractive(ExecuteSingle, RunnerInteractive):
 class RunnerFilterNonInteractive(ExecuteSingle, RunnerNonInteractive):
     """Represents the runner specialized for the filtering mode."""
 
-    def __init__(self, pipeline: PromptPipeline, strategy: InputStrategy) -> None:
+    def __init__(self, pipeline: IPromptPipeline, strategy: InputStrategy) -> None:
         self._pipeline = pipeline
-        self._token_cls = pipeline.token_cls
+        self._token_cls = pipeline.tokenizer.token_cls
         self._input_strategy = strategy
 
     def _execute_single_inner(self, source: str) -> str:
@@ -1066,13 +1060,14 @@ class RunnerSetOperationInteractiveDual(ExecuteDual, RunnerInteractive):
 
     def __init__(
         self,
-        tokenizer: IPromptTokenizer,
+        pipeline: IPromptPipeline,
         strategy: InputStrategy,
         calculator: SetCalculatorWrapper,
         detector: type[PromptDifferenceDetector],
         use_clipboard: bool,
     ) -> None:
-        self._tokenizer = tokenizer
+        self._pipeline = pipeline
+        self._tokenizer = self._pipeline.tokenizer
         self._input_strategy = strategy
 
         self._calculator = calculator
@@ -1087,6 +1082,7 @@ class RunnerSetOperationInteractiveDual(ExecuteDual, RunnerInteractive):
             self._tokenizer.token_cls(name=x.name, weight=x.weight)
             for x in self._calculator.do_math(prompt_first_before, prompt_second_before)
         ]
+        self._pipeline = self._pipeline
 
         logger.info("(statistics) prompt A <> result")
         StatisticsHandler.show_cli_stat(PipelineResult(prompt_first_before, prompt))
@@ -1094,9 +1090,7 @@ class RunnerSetOperationInteractiveDual(ExecuteDual, RunnerInteractive):
         logger.info("(statistics) prompt B <> result")
         StatisticsHandler.show_cli_stat(PipelineResult(prompt_second_before, prompt))
 
-        selialized = self._tokenizer.delimiter.sep_output.join(
-            str(token) for token in prompt
-        )
+        selialized = str(self._pipeline.new(prompt))
 
         if self._use_clipboard:
             ClipboardHandler.copy_to_clipboard(selialized)
@@ -1108,14 +1102,15 @@ class RunnerSetOperationIteractiveMono(ExecuteSingle, RunnerNonInteractive):
 
     def __init__(
         self,
-        tokenizer: IPromptTokenizer,
+        pipeline: IPromptPipeline,
         strategy: InputStrategy,
         calculator: SetCalculatorWrapper,
         detector: type[PromptDifferenceDetector],
         fixed_prompt: MutablePrompt,
         use_clipboard: bool,
     ) -> None:
-        self._tokenizer = tokenizer
+        self._pipeline = pipeline
+        self._tokenizer = self._pipeline.tokenizer
         self._input_strategy = strategy
 
         self._calculator = calculator
@@ -1126,16 +1121,16 @@ class RunnerSetOperationIteractiveMono(ExecuteSingle, RunnerNonInteractive):
     @classmethod
     def create_from_text(
         cls,
-        tokenizer: IPromptTokenizer,
+        pipeline: IPromptPipeline,
         strategy: InputStrategy,
         calculator: SetCalculatorWrapper,
         detector: type[PromptDifferenceDetector],
         text: typing.TextIO,
         use_clipboard: bool,
     ) -> Self:
-        fixed_prompt = tokenizer.tokenize_prompt(text.read())
+        fixed_prompt = pipeline.tokenizer.tokenize_prompt(text.read())
         return cls(
-            tokenizer, strategy, calculator, detector, fixed_prompt, use_clipboard
+            pipeline, strategy, calculator, detector, fixed_prompt, use_clipboard
         )
 
     def _execute_single_inner(self, source: str) -> str:
@@ -1146,9 +1141,7 @@ class RunnerSetOperationIteractiveMono(ExecuteSingle, RunnerNonInteractive):
             for x in self._calculator.do_math(self._fixed_prompt, prompt_second_before)
         ]
 
-        selialized = self._tokenizer.delimiter.sep_output.join(
-            str(token) for token in prompt
-        )
+        selialized = str(self._pipeline.new(prompt))
 
         if self._use_clipboard:
             ClipboardHandler.copy_to_clipboard(selialized)
@@ -1173,25 +1166,23 @@ class CliCommandsDemo(CliCommands):
             else inputs.MultipleInputStrategy(ps1, ps2)
         )
 
-    def _initialize_parser(self) -> type[ParserInterface]:
-        if self._args.is_tfind():
-            return DummyParser
-        else:
-            return ParserV2 if self._args.is_parser_v2() else ParserV1
-
-    def _initialize_tokenizer(self) -> PromptTokenizer:
+    def _initialize_pipeline(self) -> IPromptPipeline:
         token_cls = TokenInteractive if self._args.interactive else TokenNonInteractive
-        parser_cls = self._initialize_parser()
-
-        tokenizer_cls = None
-        if self._args.is_parser_v2():
-            tokenizer_cls = PromptTokenizerV2
-        elif self._args.is_tfind():
-            tokenizer_cls = PromptTokenizerV2
-        else:
-            tokenizer_cls = PromptTokenizerV1
+        filterpipe = self._initialize_filter_pipeline()
         delimiter = Delimiter(self._args.input_delimiter, self._args.output_delimiter)
-        return tokenizer_cls(parser_cls, token_cls, delimiter)
+
+        if self._args.is_parser_v2():
+            return PromptPipelineV2(
+                PromptTokenizerV2(ParserV2(), token_cls), filterpipe
+            )
+        elif self._args.is_tfind():
+            return PromptPipelineV1(
+                PromptTokenizerV1(DummyParser(delimiter), token_cls), filterpipe
+            )
+        else:
+            return PromptPipelineV1(
+                PromptTokenizerV1(ParserV1(delimiter), token_cls), filterpipe
+            )
 
     def _initialize_filter_pipeline(self) -> FilterExecutor:
         filterpipe = FilterExecutor()
@@ -1206,10 +1197,7 @@ class CliCommandsDemo(CliCommands):
 
         return filterpipe
 
-    def _initialize_pipeline(self) -> type[PromptPipeline]:
-        return PromptPipelineV2 if self._args.is_parser_v2() else PromptPipelineV1
-
-    def _initialize_runner(self, pipe: PromptPipeline) -> CliRunnable:
+    def _initialize_runner(self, pipe: IPromptPipeline) -> CliRunnable:
         """Returns a runner."""
         input_strategy = self._get_input_strategy()
 
@@ -1227,7 +1215,7 @@ class CliCommandsDemo(CliCommands):
             calculator = SetCalculatorWrapper.create_from(self._args.set_op_id)
             if self._args.interactive:
                 return RunnerSetOperationInteractiveDual(
-                    pipe.tokenizer,
+                    pipe,
                     input_strategy,
                     calculator,
                     PromptDifferenceDetector,
@@ -1235,7 +1223,7 @@ class CliCommandsDemo(CliCommands):
                 )
             else:
                 return RunnerSetOperationIteractiveMono.create_from_text(
-                    pipe.tokenizer,
+                    pipe,
                     input_strategy,
                     calculator,
                     PromptDifferenceDetector,
@@ -1265,16 +1253,15 @@ class CliCommandsDemo(CliCommands):
         else:  # default
             raise NotImplementedError
 
-    def _get_pipeline(self) -> PromptPipeline:
+    def _get_pipeline(self) -> IPromptPipeline:
         """This is a pipeline for the purpose of showcasing.
         Since all the parameters of each command is variable, the command
         sacrifices the composability.
         It is good for you to create your own pipeline, and name it
         so you can use it as a preset."""
 
-        tokenizer = self._initialize_tokenizer()
-        filterpipe = self._initialize_filter_pipeline()
-        return self._initialize_pipeline()(tokenizer, filterpipe)
+        pipeline_cls = self._initialize_pipeline()
+        return pipeline_cls
 
     def _get_runner(self) -> CliRunnable:
         pipe = self._get_pipeline()
