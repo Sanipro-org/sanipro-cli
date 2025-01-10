@@ -3,7 +3,6 @@ import atexit
 import functools
 import logging
 import os
-import pprint
 import readline
 import sys
 import tempfile
@@ -62,7 +61,6 @@ from saniprocli.cli_runner import (
 from saniprocli.color import style
 from saniprocli.commands import CliArgsNamespaceDefault, CliCommands
 from saniprocli.help_formatter import SaniproHelpFormatter
-from saniprocli.logger import logger_fp
 from saniprocli.sanipro_argparse import SaniproArgumentParser
 
 logging.basicConfig(
@@ -97,14 +95,10 @@ class ModuleMatcher:
 
     def match(self, method: str) -> typing.Any:
         # TODO: better type hinting without using typing.Any.
-        f = self.commands.list_commands()
-        logger.debug(f"{method=}")
-        pprint.pprint(f, logger_fp)
-
-        result = f.get(method)
-        if result is None:
-            raise KeyError
-        return result
+        try:
+            return self.commands.list_commands()[method]
+        except KeyError:
+            raise ModuleNotFoundError
 
 
 class SubparserInjectable(ABC):
@@ -223,53 +217,32 @@ class CliSimilarCommand(CliCommand):
 
     @classmethod
     def _query_strategy(
-        cls, method: str | None = None
-    ) -> type[ReordererStrategy] | None:
+        cls, method: str = SimilarModuleMapper.GREEDY.key
+    ) -> type[ReordererStrategy]:
+        mapper = ModuleMatcher(SimilarModuleMapper)
+        return mapper.match(method)
+
+    @classmethod
+    def get_class(cls, cmd: "CliArgsNamespaceDemo") -> type[ReordererStrategy]:
         """Matches the methods specified on the command line
         to the names of concrete classes.
         Searches other than what the strategy uses MST."""
 
-        default = SimilarModuleMapper.GREEDY.key
-        if method is None:
-            method = default
+        query = cmd.similar_method
+        if query == "mst":
+            if cmd.kruskal:
+                query = "kruskal"
+            elif cmd.prim:
+                query = "prim"
 
-        mapper = ModuleMatcher(SimilarModuleMapper)
-        matched = mapper.match(method)
-
-        if issubclass(matched, ReordererStrategy):
-            return matched
-        return None
+        return cls._query_strategy(method=query)
 
     @classmethod
     def get_reorderer(cls, cmd: "CliArgsNamespaceDemo") -> ReordererStrategy:
         """Instanciate one reorder function from the parsed result."""
 
-        def get_class(cmd: "CliArgsNamespaceDemo") -> type[ReordererStrategy] | None:
-            query = cmd.similar_method
-            if query != "mst":
-                return cls._query_strategy(method=query)
-            else:
-                adapters = [
-                    [cmd.kruskal, SimilarModuleMapper.KRUSKAL],
-                    [cmd.prim, SimilarModuleMapper.PRIM],
-                ]
-                for _flag, _cls in adapters:
-                    if _flag and isinstance(_cls, CmdModuleTuple):
-                        # when --kruskal or --prim flag is specified
-                        return _cls.callable_name
-
-                _, fallback_cls = adapters[0]
-                if isinstance(fallback_cls, CmdModuleTuple):
-                    return fallback_cls.callable_name
-            return None
-
-        selected_cls = get_class(cmd)
-        if selected_cls is not None:
-            if issubclass(selected_cls, ReordererStrategy):
-                logger.debug(f"selected module: {selected_cls.__name__}")
-                return selected_cls(strategy=SequenceMatcherSimilarity())
-
-        raise ValueError("failed to find reorder function.")
+        selected_cls = cls.get_class(cmd)
+        return selected_cls(strategy=SequenceMatcherSimilarity())
 
     @classmethod
     def create_from_cmd(cls, cmd: "CliArgsNamespaceDemo", *, reverse=False) -> Self:
@@ -446,16 +419,13 @@ class CliSortAllCommand(CliCommand):
         )
 
     @classmethod
-    def _query_strategy(cls, *, method: str | None = None) -> functools.partial:
+    def _query_strategy(
+        cls, *, method: str = SortAllModuleMapper.LEXICOGRAPHICAL.key
+    ) -> functools.partial:
         """Matches `method` to the name of a concrete class."""
-        default = SortAllModuleMapper.LEXICOGRAPHICAL.key
-        if method is None:
-            method = default
-
         mapper = ModuleMatcher(SortAllModuleMapper)
         try:
-            partial = functools.partial(sorted, key=mapper.match(method))
-            return partial
+            return functools.partial(sorted, key=mapper.match(method))
         except KeyError:
             raise ValueError("method name is not found.")
 
