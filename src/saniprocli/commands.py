@@ -131,7 +131,7 @@ class CliCommands(PipelineGettable, ABC):
         self._args = args
 
     def get_logger_level(self) -> int:
-        if self._args.verbose is None:
+        if self._args.verbose == 0:
             return logging.WARNING
         try:
             log_level = get_log_level_from(self._args.verbose)

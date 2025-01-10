@@ -1,6 +1,5 @@
 import argparse
 import atexit
-import functools
 import logging
 import os
 import readline
@@ -9,7 +8,6 @@ import tempfile
 import typing
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
-from functools import partial
 from typing import NamedTuple
 
 import pyperclip
@@ -369,8 +367,8 @@ class SortAllModuleMapper(ModuleMapper):
 class CliSortAllCommand(CliCommand):
     command_id: str = "sort-all"
 
-    def __init__(self, sorted_partial: partial, reverse: bool = False):
-        self.command = SortAllCommand(sorted_partial, reverse)
+    def __init__(self, key: Callable, reverse: bool = False):
+        self.command = SortAllCommand(key, reverse)
 
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
@@ -420,20 +418,20 @@ class CliSortAllCommand(CliCommand):
 
     @classmethod
     def _query_strategy(
-        cls, *, method: str = SortAllModuleMapper.LEXICOGRAPHICAL.key
-    ) -> functools.partial:
+        cls, method: str = SortAllModuleMapper.LEXICOGRAPHICAL.key
+    ) -> Callable:
         """Matches `method` to the name of a concrete class."""
         mapper = ModuleMatcher(SortAllModuleMapper)
         try:
-            return functools.partial(sorted, key=mapper.match(method))
+            return mapper.match(method)
         except KeyError:
             raise ValueError("method name is not found.")
 
     @classmethod
     def create_from_cmd(cls, cmd: "CliArgsNamespaceDemo", *, reverse=False) -> Self:
         """Alternative method."""
-
-        partial = cls._query_strategy(method=cmd.sort_all_method)
+        method = cmd.sort_all_method
+        partial = cls._query_strategy(method)
         return cls(partial, reverse=reverse)
 
 
