@@ -11,12 +11,12 @@ from collections.abc import Callable, Sequence
 from typing import NamedTuple
 
 import pyperclip
-from sanipro.abc import IPipelineResult, IPromptPipeline, MutablePrompt, Prompt
+from sanipro.abc import IPipelineResult, IPromptPipeline, MutablePrompt
 from sanipro.compatible import Self
 from sanipro.delimiter import Delimiter
 from sanipro.diff import PromptDifferenceDetector
 from sanipro.filter_exec import FilterExecutor
-from sanipro.filters.abc import ExecutePrompt, ReordererStrategy
+from sanipro.filters.abc import ReordererStrategy
 from sanipro.filters.exclude import ExcludeCommand
 from sanipro.filters.fuzzysort import (
     GreedyReorderer,
@@ -108,18 +108,11 @@ class SubparserInjectable(ABC):
         """Injects subparser."""
 
 
-class CliCommand(ExecutePrompt, SubparserInjectable):
+class CliCommand(SubparserInjectable):
     """The wrapper class for the filter commands
     with the addition of subparser."""
 
     command_id: str
-    command: ExecutePrompt
-
-    def __init__(self, command: ExecutePrompt) -> None:
-        self.command = command
-
-    def execute_prompt(self, prompt: Prompt) -> MutablePrompt:
-        return self.command.execute_prompt(prompt)
 
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
@@ -130,7 +123,7 @@ class CliExcludeCommand(CliCommand):
     command_id: str = "exclude"
 
     def __init__(self, excludes: Sequence[str]):
-        super().__init__(ExcludeCommand(excludes))
+        self.command = ExcludeCommand(excludes)
 
 
 class SimilarModuleMapper(ModuleMapper):
@@ -144,7 +137,7 @@ class CliSimilarCommand(CliCommand):
     command_id: str = "similar"
 
     def __init__(self, reorderer: ReordererStrategy, *, reverse=False):
-        super().__init__(SimilarCommand(reorderer, reverse=reverse))
+        self.command = SimilarCommand(reorderer, reverse=reverse)
 
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
@@ -169,6 +162,7 @@ class CliSimilarCommand(CliCommand):
             description="Reorders tokens with their similarity.",
             dest="similar_method",
             metavar="METHOD",
+            required=True,
         )
 
         cls._add_subcommands(subcommand)
@@ -388,6 +382,7 @@ class CliSortAllCommand(CliCommand):
             description="The available method to sort the tokens.",
             dest="sort_all_method",
             metavar="METHOD",
+            required=True,
         )
 
         subcommand.add_parser(
@@ -1156,14 +1151,14 @@ class CliCommandsDemo(CliCommands):
 
     def _initialize_filter_pipeline(self) -> FilterExecutor:
         filterpipe = FilterExecutor()
-        filterpipe.append_command(CliRoundUpCommand(self._args.roundup))
+        filterpipe.append_command(CliRoundUpCommand(self._args.roundup).command)
 
         if self._args.filter_id is not None:
             command_map = self._command_map()
             filterpipe.append_command(command_map[self._args.filter_id]())
 
         if self._args.exclude:
-            filterpipe.append_command(CliExcludeCommand(self._args.exclude))
+            filterpipe.append_command(CliExcludeCommand(self._args.exclude).command)
 
         return filterpipe
 
@@ -1260,20 +1255,17 @@ class CliCommandsDemo(CliCommands):
 
 
 def app():
-    try:
-        args = CliArgsNamespaceDemo.from_sys_argv(sys.argv[1:])
-        cli_commands = CliCommandsDemo(args)
+    args = CliArgsNamespaceDemo.from_sys_argv(sys.argv[1:])
+    cli_commands = CliCommandsDemo(args)
 
-        log_level = cli_commands.get_logger_level()
-        logger_root.setLevel(log_level)
+    log_level = cli_commands.get_logger_level()
+    logger_root.setLevel(log_level)
 
-        for key, val in args.__dict__.items():
-            logger.debug(f"(settings) {key} = {val!r}")
+    for key, val in args.__dict__.items():
+        logger.debug(f"(settings) {key} = {val!r}")
 
-        runner = cli_commands.to_runner()
-        runner.run()
-    finally:
-        sys.exit(1)
+    runner = cli_commands.to_runner()
+    runner.run()
 
 
 if __name__ == "__main__":
