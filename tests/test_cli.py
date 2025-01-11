@@ -3,7 +3,6 @@ import subprocess
 import unittest
 import unittest.mock
 from os.path import dirname, join
-from posixpath import dirname
 from subprocess import DEVNULL
 from typing import NamedTuple
 from unittest.mock import Mock
@@ -81,9 +80,7 @@ class TestCliSortAllCommand(unittest.TestCase):
             cls.sort_all_method = cli_namespace.sort_all_method
             cls.reverse = Mock(cli_namespace.reverse)
 
-            command = CliSortAllCommand.create_from_cmd(
-                cls, reverse=cli_namespace.reverse
-            )
+            command = CliSortAllCommand.create_from_cmd(cls)
             with self.subTest(method=cli_namespace):
                 self.assertEqual(command.command.reverse, predicate)
 

@@ -237,10 +237,10 @@ class CliSimilarCommand(CliCommand):
         return selected_cls(strategy=SequenceMatcherSimilarity())
 
     @classmethod
-    def create_from_cmd(cls, cmd: "CliArgsNamespaceDemo", *, reverse=False) -> Self:
+    def create_from_cmd(cls, cmd: "CliArgsNamespaceDemo") -> Self:
         """Alternative method."""
 
-        return cls(reorderer=cls.get_reorderer(cmd), reverse=reverse)
+        return cls(reorderer=cls.get_reorderer(cmd), reverse=cmd.reverse)
 
 
 class CliMaskCommand(CliCommand):
@@ -423,11 +423,11 @@ class CliSortAllCommand(CliCommand):
             raise ValueError("method name is not found.")
 
     @classmethod
-    def create_from_cmd(cls, cmd: "CliArgsNamespaceDemo", *, reverse=False) -> Self:
+    def create_from_cmd(cls, cmd: "CliArgsNamespaceDemo") -> Self:
         """Alternative method."""
         method = cmd.sort_all_method
         partial = cls._query_strategy(method)
-        return cls(partial, reverse=reverse)
+        return cls(partial, reverse=cmd.reverse)
 
 
 class CliUniqueCommand(CliCommand):
@@ -1155,7 +1155,7 @@ class CliCommandsDemo(CliCommands):
 
         if self._args.filter_id is not None:
             command_map = self._command_map()
-            filterpipe.append_command(command_map[self._args.filter_id]())
+            filterpipe.append_command(command_map[self._args.filter_id]().command)
 
         if self._args.exclude:
             filterpipe.append_command(CliExcludeCommand(self._args.exclude).command)
@@ -1244,8 +1244,8 @@ class CliCommandsDemo(CliCommands):
             lambda: CliMaskCommand(args.mask, args.replace_to),
             lambda: CliRandomCommand(args.seed),
             lambda: CliResetCommand(args.value),
-            lambda: CliSimilarCommand.create_from_cmd(cmd=args, reverse=args.reverse),
-            lambda: CliSortAllCommand.create_from_cmd(cmd=args, reverse=args.reverse),
+            lambda: CliSimilarCommand.create_from_cmd(args),
+            lambda: CliSortAllCommand.create_from_cmd(args),
             lambda: CliSortCommand(args.reverse),
             lambda: CliUniqueCommand(args.reverse),
         )
@@ -1260,9 +1260,6 @@ def app():
 
     log_level = cli_commands.get_logger_level()
     logger_root.setLevel(log_level)
-
-    for key, val in args.__dict__.items():
-        logger.debug(f"(settings) {key} = {val!r}")
 
     runner = cli_commands.to_runner()
     runner.run()
