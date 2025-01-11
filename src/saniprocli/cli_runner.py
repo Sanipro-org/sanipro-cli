@@ -1,6 +1,8 @@
 import logging
 import time
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from enum import Enum, auto
 
 from sanipro.abc import IPromptPipeline
 from sanipro.logger import logger
@@ -101,6 +103,20 @@ class ExecuteSingle(ConsoleWriter, CliSingular, ABC):
                 logger.fatal(f"error: {e}")
 
 
+class _InputState(Enum):
+    FIRST_INPUT = auto()
+    SECOND_INPUT = auto()
+    EXECUTE = auto()
+
+
+@dataclass
+class _InputContext:
+    first: str = ""
+    second: str = ""
+    original_color: str = ""
+    state: _InputState = _InputState.FIRST_INPUT
+
+
 class ExecuteDual(ConsoleWriter, CliPlural, ABC):
     """Represents the runner with the interactive user interface
     that expects two different prompts."""
@@ -127,37 +143,51 @@ class ExecuteDual(ConsoleWriter, CliPlural, ABC):
             except Exception as e:
                 logger.fatal(f"error: {e}")
 
+    def _handle_first_input(self) -> _InputState:
+        try:
+            self._ctx.first = self._handle_input()
+            if self._ctx.first:
+                return _InputState.SECOND_INPUT
+        except EOFError:
+            raise
+        return _InputState.FIRST_INPUT
+
+    def _handle_second_input(self) -> _InputState:
+        color.color_foreground = "green"
+        try:
+            self._ctx.second = self._handle_input()
+            if self._ctx.second:
+                return _InputState.EXECUTE
+        except EOFError:
+            color.color_foreground = self._ctx.original_color
+            return _InputState.FIRST_INPUT
+        return _InputState.SECOND_INPUT
+
+    def _handle_execution(self) -> None:
+        out = self._execute_multi(self._ctx.first, self._ctx.second)
+        if out:
+            self._write(f"{out}\n")
+        color.color_foreground = self._ctx.original_color
+
+    def _process_state(self) -> bool:
+        handlers = {
+            _InputState.FIRST_INPUT: self._handle_first_input,
+            _InputState.SECOND_INPUT: self._handle_second_input,
+        }
+
+        if self._ctx.state in handlers:
+            self._ctx.state = handlers[self._ctx.state]()
+            return True
+        elif self._ctx.state == _InputState.EXECUTE:
+            self._handle_execution()
+            return False
+        return True
+
     def _start_loop(self) -> None:
         while True:
             try:
-                state = 00
-                first = ""
-                second = ""
-                _color = color.color_foreground
-
-                while True:
-                    if state == 00:
-                        try:
-                            first = self._handle_input()
-                            if first:
-                                state = 10
-                        except EOFError:
-                            raise
-                    elif state == 10:
-                        color.color_foreground = "green"
-                        try:
-                            second = self._handle_input()
-                            if second:
-                                state = 20
-                        except EOFError:
-                            state = 00  # reset state to 00
-                            color.color_foreground = _color
-                            continue
-                    elif state == 20:
-                        out = self._execute_multi(first, second)
-                        if out:
-                            self._write(f"{out}\n")
-                        color.color_foreground = _color
-                        break  # go to next set of prompts
+                self._ctx = _InputContext(original_color=color.color_foreground)
+                while self._process_state():
+                    continue
             except EOFError:
                 break
