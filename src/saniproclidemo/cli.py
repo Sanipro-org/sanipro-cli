@@ -13,6 +13,7 @@ from typing import NamedTuple
 import pyperclip
 from sanipro.abc import IPipelineResult, IPromptPipeline, MutablePrompt
 from sanipro.compatible import Self
+from sanipro.converter_context import TokenMap, get_config
 from sanipro.delimiter import Delimiter
 from sanipro.diff import PromptDifferenceDetector
 from sanipro.filter_exec import FilterExecutor
@@ -33,6 +34,7 @@ from sanipro.filters.reset import ResetCommand
 from sanipro.filters.roundup import RoundUpCommand
 from sanipro.filters.sort import SortCommand
 from sanipro.filters.sort_all import SortAllCommand
+from sanipro.filters.translate import TranslateTokenTypeCommand
 from sanipro.filters.unique import UniqueCommand
 from sanipro.filters.utils import (
     sort_by_length,
@@ -42,11 +44,11 @@ from sanipro.filters.utils import (
 )
 from sanipro.logger import logger
 from sanipro.parser import DummyParser
-from sanipro.pipeline_v1 import ParserV1, PromptPipelineV1, PromptTokenizerV1
+from sanipro.pipeline_v1 import PromptPipelineV1
 from sanipro.pipeline_v2 import ParserV2, PromptPipelineV2, PromptTokenizerV2
 from sanipro.pipelineresult import PipelineResult
 from sanipro.promptset import SetCalculatorWrapper
-from sanipro.token import TokenInteractive, TokenNonInteractive
+from sanipro.tokenizer import SimpleTokenizer
 
 from saniprocli import cli_hooks, inputs
 from saniprocli.abc import CliRunnable, InputStrategy
@@ -728,6 +730,7 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
     tempdir: str
     clipboard: bool
     fixed_prompt: typing.TextIO
+    config: str
 
     def is_parser_v2(self) -> bool:
         return self.operation_id == CliSubcommandParserV2.command_id
@@ -763,6 +766,14 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
                 "Exclude this token from the original prompt. "
                 "Multiple options can be specified."
             ),
+        )
+
+        parser.add_argument(
+            "-c",
+            "--config",
+            type=str,
+            default=None,
+            help=("Specifies a config file for each token type."),
         )
 
     @classmethod
@@ -1117,6 +1128,7 @@ class RunnerSetOperationIteractiveMono(ExecuteSingle, RunnerNonInteractive):
 class CliCommandsDemo(CliCommands):
     def __init__(self, args: CliArgsNamespaceDemo) -> None:
         self._args = args
+        self._config = get_config(self._args.config)
 
     def _get_input_strategy(self) -> InputStrategy:
         if not self._args.interactive:
@@ -1131,23 +1143,51 @@ class CliCommandsDemo(CliCommands):
             else inputs.MultipleInputStrategy(ps1, ps2)
         )
 
+    def _initialize_formatter(self, token_map: TokenMap) -> Callable:
+        """Initialize formatter function which takes an only 'Token' class.
+        Note when 'csv' is chosen as Token, the token_map.formatter is
+        a partial function."""
+
+        formatter = token_map.formatter
+
+        if token_map.type_name == "csv":
+            new_formatter = formatter(token_map.field_separator)
+            formatter = new_formatter
+
+        return formatter
+
+    def _initialize_delimiter(self, itype: TokenMap) -> Delimiter:
+        its = self._config.get_input_token_separator(self._args.input_type)
+        ots = self._config.get_output_token_separator(self._args.output_type)
+        ifs = itype.field_separator
+
+        delimiter = Delimiter(its, ots, ifs)
+        return delimiter
+
     def _initialize_pipeline(self) -> IPromptPipeline:
-        token_cls = TokenInteractive if self._args.interactive else TokenNonInteractive
-        filterpipe = self._initialize_filter_pipeline()
-        delimiter = Delimiter(self._args.input_delimiter, self._args.output_delimiter)
+
+        itype = self._config.get_input_token_class(self._args.input_type)
+        otype = self._config.get_output_token_class(self._args.output_type)
+
+        formatter = self._initialize_formatter(otype)
+        filter_pipe = self._initialize_filter_pipeline()
+        delimiter = self._initialize_delimiter(itype)
 
         if self._args.is_parser_v2():
-            return PromptPipelineV2(
-                PromptTokenizerV2(ParserV2(), token_cls), filterpipe
-            )
+            parser = ParserV2()
+            token_type = itype.token_type
+            tokenizer = PromptTokenizerV2(parser, token_type)
+            return PromptPipelineV2(tokenizer, filter_pipe)
         elif self._args.is_tfind():
-            return PromptPipelineV1(
-                PromptTokenizerV1(DummyParser(delimiter), token_cls), filterpipe
-            )
+            parser = DummyParser(delimiter)
+            token_type = itype.token_type
+            tokenizer = SimpleTokenizer(parser, token_type)
+            return PromptPipelineV1(tokenizer, filter_pipe, formatter)
         else:
-            return PromptPipelineV1(
-                PromptTokenizerV1(ParserV1(delimiter), token_cls), filterpipe
-            )
+            parser = itype.parser(delimiter)
+            token_type = otype.token_type
+            tokenizer = itype.tokenizer(parser, token_type)
+            return PromptPipelineV1(tokenizer, filter_pipe, formatter)
 
     def _initialize_filter_pipeline(self) -> FilterExecutor:
         filterpipe = FilterExecutor()
@@ -1159,6 +1199,10 @@ class CliCommandsDemo(CliCommands):
 
         if self._args.exclude:
             filterpipe.append_command(CliExcludeCommand(self._args.exclude).command)
+
+        # add filter to for converting token type
+        token_type = self._config.get_output_token_class(self._args.output_type)
+        filterpipe.append_command(TranslateTokenTypeCommand(token_type.token_type))
 
         return filterpipe
 
@@ -1176,9 +1220,12 @@ class CliCommandsDemo(CliCommands):
                     pipe, input_strategy, PromptDifferenceDetector, self._args.clipboard
                 )
             return RunnerFilterNonInteractive(pipe, input_strategy)
+
         elif self._args.is_set_operation():
             calculator = SetCalculatorWrapper.create_from(self._args.set_op_id)
+
             if self._args.interactive:
+
                 return RunnerSetOperationInteractiveDual(
                     pipe,
                     input_strategy,
@@ -1187,6 +1234,7 @@ class CliCommandsDemo(CliCommands):
                     self._args.clipboard,
                 )
             else:
+
                 return RunnerSetOperationIteractiveMono.create_from_text(
                     pipe,
                     input_strategy,
@@ -1197,6 +1245,7 @@ class CliCommandsDemo(CliCommands):
                 )
         elif self._args.is_tfind():
             if self._args.interactive:
+
                 return RunnerTagFindInteractive.create_from_csv(
                     pipeline=pipe,
                     text=self._args.infile,
@@ -1207,6 +1256,7 @@ class CliCommandsDemo(CliCommands):
                     tempdir=self._args.tempdir,
                     use_clipboard=self._args.clipboard,
                 )
+
             return RunnerTagFindNonInteractive.create_from_csv(
                 pipeline=pipe,
                 text=self._args.infile,
@@ -1261,7 +1311,12 @@ def app():
     log_level = cli_commands.get_logger_level()
     logger_root.setLevel(log_level)
 
-    runner = cli_commands.to_runner()
+    try:
+        runner = cli_commands.to_runner()
+    except AttributeError as e:
+        logger.error(f"error: {e}")
+        exit(1)
+
     runner.run()
 
 

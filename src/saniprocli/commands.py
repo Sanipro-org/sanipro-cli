@@ -23,9 +23,9 @@ logger_root = logging.getLogger()
 class CliArgsNamespaceDefault(HasPrettyRepr, ParserAppendable, SubParserAppendable):
     """Default namespace for the argparser."""
 
-    input_delimiter: str
+    input_type: str
     one_line: bool
-    output_delimiter: str
+    output_type: str
     ps1: str
     ps2: str
     verbose: int
@@ -36,10 +36,18 @@ class CliArgsNamespaceDefault(HasPrettyRepr, ParserAppendable, SubParserAppendab
 
         parser.add_argument(
             "-d",
-            "--input-delimiter",
+            "--input-type",
             type=str,
-            default=",",
-            help=("Preferred delimiter string for the original prompts."),
+            default="a1111",
+            help=("Preferred token type for the original prompts."),
+        )
+
+        parser.add_argument(
+            "-s",
+            "--output-type",
+            default="a1111",
+            type=str,
+            help=("Preferred token type for the processed prompts."),
         )
 
         parser.add_argument(
@@ -48,14 +56,6 @@ class CliArgsNamespaceDefault(HasPrettyRepr, ParserAppendable, SubParserAppendab
             default=False,
             action="store_true",
             help=("Whether to confirm the prompt input with a single line of input."),
-        )
-
-        parser.add_argument(
-            "-s",
-            "--output-delimiter",
-            default=", ",
-            type=str,
-            help=("Preferred delimiter string for the processed prompts."),
         )
 
         parser.add_argument(
