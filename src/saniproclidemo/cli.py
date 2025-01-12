@@ -42,7 +42,7 @@ from sanipro.filters.utils import (
     sort_by_weight,
     sort_lexicographically,
 )
-from sanipro.logger import logger
+from sanipro.logger import logger, logger_root
 from sanipro.parser import DummyParser
 from sanipro.pipeline_v1 import PromptPipelineV1
 from sanipro.pipeline_v2 import ParserV2, PromptPipelineV2, PromptTokenizerV2
@@ -69,8 +69,6 @@ logging.basicConfig(
     ),
     datefmt=r"%Y-%m-%d %H:%M:%S",
 )
-
-logger_root = logging.getLogger()
 
 
 class CmdModuleTuple(NamedTuple):

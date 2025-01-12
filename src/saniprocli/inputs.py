@@ -1,9 +1,8 @@
 import sys
 
 from saniprocli.abc import InputStrategy
+from saniprocli.color import style_for_readline
 from saniprocli.console import ConsoleWriter
-
-from .color import style_for_readline
 
 
 def input_last_break(prompt: str = "") -> str:

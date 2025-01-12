@@ -4,6 +4,7 @@ from collections.abc import Sequence
 
 from sanipro.abc import IPromptPipeline
 from sanipro.compatible import Self
+from sanipro.converter_context import SupportedTokenType
 from sanipro.utils import HasPrettyRepr
 
 from saniprocli.abc import (
@@ -12,12 +13,9 @@ from saniprocli.abc import (
     PipelineGettable,
     SubParserAppendable,
 )
+from saniprocli.help_formatter import SaniproHelpFormatter
+from saniprocli.logger import get_log_level_from
 from saniprocli.sanipro_argparse import SaniproArgumentParser
-
-from .help_formatter import SaniproHelpFormatter
-from .logger import get_log_level_from
-
-logger_root = logging.getLogger()
 
 
 class CliArgsNamespaceDefault(HasPrettyRepr, ParserAppendable, SubParserAppendable):
@@ -38,6 +36,7 @@ class CliArgsNamespaceDefault(HasPrettyRepr, ParserAppendable, SubParserAppendab
             "-d",
             "--input-type",
             type=str,
+            choices=SupportedTokenType.choises(),
             default="a1111",
             help=("Preferred token type for the original prompts."),
         )
@@ -45,8 +44,9 @@ class CliArgsNamespaceDefault(HasPrettyRepr, ParserAppendable, SubParserAppendab
         parser.add_argument(
             "-s",
             "--output-type",
-            default="a1111",
             type=str,
+            choices=SupportedTokenType.choises(),
+            default="a1111",
             help=("Preferred token type for the processed prompts."),
         )
 

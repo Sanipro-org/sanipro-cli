@@ -1,4 +1,3 @@
-import logging
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -11,8 +10,6 @@ from sanipro.promptset import SetCalculatorWrapper
 from saniprocli import cli_hooks, color
 from saniprocli.abc import CliPlural, CliRunnable, CliSingular, InputStrategy
 from saniprocli.console import ConsoleWriter
-
-logger_root = logging.getLogger()
 
 
 class BannerMixin(ConsoleWriter):
