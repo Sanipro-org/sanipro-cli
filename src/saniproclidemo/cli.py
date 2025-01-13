@@ -4,7 +4,6 @@ import logging
 import os
 import readline
 import sys
-import tempfile
 import typing
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
@@ -62,6 +61,7 @@ from saniprocli.color import style
 from saniprocli.commands import CliArgsNamespaceDefault, CliCommands
 from saniprocli.help_formatter import SaniproHelpFormatter
 from saniprocli.sanipro_argparse import SaniproArgumentParser
+from saniprocli.textutils import CsvUtils, dump_to_file, get_temp_filename
 
 logging.basicConfig(
     format=(
@@ -828,36 +828,6 @@ class StatisticsHandler:
             logger.info("(statistics) %s", line)
 
 
-def replace_underscore(line: str) -> str:
-    line = line.strip("\n")
-    line = line.replace("_", " ")
-    return line
-
-
-class CsvUtils:
-    @staticmethod
-    def create_dict(
-        text: typing.TextIO, delim: str, key_idx: int, value_idx: int
-    ) -> dict[str, str]:
-        """A helper function for creating the dictionary from the CSV file."""
-        if key_idx == value_idx:
-            raise ValueError("impossible to specify the same field number")
-        if key_idx < 1 or value_idx < 1:
-            raise ValueError("field number must be 1 or more")
-        key_idx -= 1
-        value_idx -= 1
-
-        dict_: dict[str, str] = {}
-        lines = map(replace_underscore, text.readlines())
-        try:
-            for row in map(lambda line: line.split(delim), lines):
-                dict_ |= {row[key_idx]: row[value_idx]}
-        except IndexError:
-            raise IndexError("failed to get the element of the row number")
-
-        return dict_
-
-
 class RunnerTagFindNonInteractive(ExecuteSingle, RunnerNonInteractive):
     """Represents the runner specialized for the filtering mode."""
 
@@ -887,11 +857,8 @@ class RunnerTagFindNonInteractive(ExecuteSingle, RunnerNonInteractive):
         The index starts from 1. This is because common traditional command-line
         utilities assume the field index originates from 1."""
         try:
-            return cls(
-                pipeline,
-                CsvUtils.create_dict(text, delim, key_idx, value_idx),
-                strategy,
-            )
+            tags_n_count = CsvUtils.create_dict_from_io(text, delim, key_idx, value_idx)
+            return cls(pipeline, tags_n_count, strategy)
         except IndexError:
             raise
 
@@ -942,33 +909,28 @@ class RunnerTagFindInteractive(ExecuteSingle, RunnerInteractive):
         The `tempdir` is used to store the history file for the GNU Readline.
         """
         try:
-            return cls(
-                pipeline,
-                CsvUtils.create_dict(text, delim, key_idx, value_idx),
-                strategy,
-                tempdir,
-                use_clipboard,
-            )
-        except IndexError:
-            raise
+            tag_n_count = CsvUtils.create_dict_from_io(text, delim, key_idx, value_idx)
+            return cls(pipeline, tag_n_count, strategy, tempdir, use_clipboard)
+        except IndexError as e:
+            raise type(e)
 
     def _on_init(self) -> None:
-        fp = tempfile.NamedTemporaryFile(delete=False, dir=self.tempdir)
-        for key in self.tags_n_count.keys():
-            fp.write(f"{key}\n".encode())
-        histfile = fp.name
-        fp.close()
+        histfile = get_temp_filename(self.tempdir)
+        dump_to_file(histfile, self.tags_n_count.keys())
 
         try:
             readline.read_history_file(histfile)
-        except FileNotFoundError:
-            logger.exception(f"failed to read history file: {histfile}")
+        except FileNotFoundError as e:
+            raise type(e)("failed to read history file: %s" % (histfile,))
+
         # so that the file is deleted after the program exits
         self._histfile = histfile
 
     def _on_exit(self) -> None:
-        if self._histfile:
+        try:
             os.remove(self._histfile)
+        except OSError:
+            logger.warning("%s: history file was not deleted", self._histfile)
 
     def _execute_single_inner(self, source: str) -> str:
         tokens = [
