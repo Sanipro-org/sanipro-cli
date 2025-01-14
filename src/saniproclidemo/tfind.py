@@ -1,4 +1,5 @@
 import argparse
+import atexit
 import collections
 import collections.abc
 import os
@@ -12,7 +13,7 @@ from sanipro.delimiter import Delimiter
 from sanipro.logger import logger, logger_root
 from sanipro.token import Escaper
 
-from saniprocli import inputs
+from saniprocli import cli_hooks, inputs
 from saniprocli.abc import CliRunnable, InputStrategy
 from saniprocli.cli_runner import ExecuteSingle, RunnerDeclarative, RunnerInteractive
 from saniprocli.commands import (
@@ -287,6 +288,24 @@ class RunnerTagFindNonInteractive(ExecuteSingle, RunnerDeclarative):
         return self._app.execute(source, self.tags_n_count)
 
 
+def prepare_readline() -> None:
+    """Prepare readline for the interactive mode."""
+    histfile = os.path.join(os.path.expanduser("~"), ".tagfinder_history")
+
+    try:
+        readline.read_history_file(histfile)
+        h_len = readline.get_current_history_length()
+    except FileNotFoundError:
+        open(histfile, "wb").close()
+        h_len = 0
+
+    def save(prev_h_len, histfile):
+        new_h_len = readline.get_current_history_length()
+        readline.append_history_file(new_h_len - prev_h_len, histfile)
+
+    atexit.register(save, h_len, histfile)
+
+
 class CliCommandsDemo(CliCommands):
     def __init__(self, args: CliArgsNamespaceDemo) -> None:
         self._args = args
@@ -305,6 +324,9 @@ class CliCommandsDemo(CliCommands):
         )
 
     def to_runner(self) -> CliRunnable:
+        cli_hooks.on_init.append(prepare_readline)
+        cli_hooks.execute(cli_hooks.on_init)
+
         delimiter = Delimiter(
             self._args.input_delimiter,
             self._args.output_delimiter,

@@ -50,7 +50,7 @@ from sanipro.pipeline_v2 import ParserV2, PromptPipelineV2, PromptTokenizerV2
 from sanipro.pipelineresult import PipelineResult
 from sanipro.promptset import SetCalculatorWrapper
 
-from saniprocli import inputs
+from saniprocli import cli_hooks, inputs
 from saniprocli.abc import CliRunnable, InputStrategy, RunnerFilter, RunnerSetOperation
 from saniprocli.cli_runner import (
     ExecuteMultiple,
@@ -942,6 +942,9 @@ class CliCommandsDemo(CliCommands):
     def _initialize_runner(self, pipe: IPromptPipeline) -> CliRunnable:
         """Returns a runner."""
         input_strategy = self._get_input_strategy()
+
+        cli_hooks.on_init.append(prepare_readline)
+        cli_hooks.execute(cli_hooks.on_init)
 
         if self._args.is_filter() or self._args.is_parser_v2():
             if self._args.interactive:
