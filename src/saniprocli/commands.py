@@ -1,10 +1,11 @@
+import argparse
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 
 from sanipro.abc import IPromptPipeline
 from sanipro.compatible import Self
-from sanipro.converter_context import SupportedTokenType
+from sanipro.converter_context import SupportedInTokenType, SupportedOutTokenType
 from sanipro.utils import HasPrettyRepr
 
 from saniprocli.abc import (
@@ -36,8 +37,8 @@ class CliArgsNamespaceDefault(HasPrettyRepr, ParserAppendable, SubParserAppendab
             "-d",
             "--input-type",
             type=str,
-            choices=SupportedTokenType.choises(),
-            default="a1111",
+            choices=SupportedInTokenType.choises(),
+            default="a1111compat",
             help=("Preferred token type for the original prompts."),
         )
 
@@ -45,8 +46,8 @@ class CliArgsNamespaceDefault(HasPrettyRepr, ParserAppendable, SubParserAppendab
             "-s",
             "--output-type",
             type=str,
-            choices=SupportedTokenType.choises(),
-            default="a1111",
+            choices=SupportedOutTokenType.choises(),
+            default="a1111compat",
             help=("Preferred token type for the processed prompts."),
         )
 
@@ -147,3 +148,23 @@ class CliCommands(PipelineGettable, ABC):
 
     def _get_pipeline(self) -> IPromptPipeline:
         raise NotImplementedError
+
+
+class SubparserInjectable(ABC):
+    """The trait with the ability to inject a subparser."""
+
+    @classmethod
+    @abstractmethod
+    def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
+        """Injects subparser."""
+
+
+class CliCommand(SubparserInjectable):
+    """The wrapper class for the filter commands
+    with the addition of subparser."""
+
+    command_id: str
+
+    @classmethod
+    def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
+        """Does nothing by default."""

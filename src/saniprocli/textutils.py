@@ -2,6 +2,9 @@ import tempfile
 from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterable
 
+import pyperclip
+from sanipro.logger import logger
+
 
 class CSVUtilsBase(ABC):
     def __init__(self, lines: list[str], delim: str) -> None:
@@ -39,24 +42,13 @@ class CSVUtilsBase(ABC):
         except IndexError as e:
             raise type(e)("failed to get the element of the row number")
 
-    @staticmethod
-    def create_dict_from_io(*args) -> dict[str, str]:
+    @classmethod
+    def create_dict_from_io(cls, *args) -> dict[str, str]:
         """A helper function for creating the dictionary from the CSV file."""
 
         text, *rest, key_idx, value_idx = args
         lines = text
-        return CsvUtils(lines, *rest).prepare_kv(key_idx, value_idx)
-
-
-class CsvUtils(CSVUtilsBase):
-    def _do_preprocess(self, column: list[str]):
-        column[0] = self.replace_underscore(column[0])
-        return column
-
-    def replace_underscore(self, line: str) -> str:
-        line = line.strip("\n")
-        line = line.replace("_", " ")
-        return line
+        return cls(lines, *rest).prepare_kv(key_idx, value_idx)
 
 
 def get_temp_filename(tmp_dir: str) -> str:
@@ -75,3 +67,13 @@ def dump_to_file(path: str, lines: Iterable[str]) -> None:
     with open(path, mode="w") as fp:
         fp.write("\n".join(lines))
         fp.write("\n")
+
+
+class ClipboardHandler:
+    @staticmethod
+    def copy_to_clipboard(text: str) -> None:
+        """Copy the text to clipboard."""
+        try:
+            pyperclip.copy(text)
+        except pyperclip.PyperclipException as e:
+            logger.warning(e)

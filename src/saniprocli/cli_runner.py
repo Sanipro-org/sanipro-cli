@@ -3,12 +3,11 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from sanipro.abc import IPromptPipeline
 from sanipro.logger import logger
 from sanipro.promptset import SetCalculatorWrapper
 
 from saniprocli import cli_hooks, color
-from saniprocli.abc import CliPlural, CliRunnable, CliSingular, InputStrategy
+from saniprocli.abc import CliRunnable, IExecuteMultiple, IExecuteSingle, InputStrategy
 from saniprocli.console import ConsoleWriter
 
 
@@ -57,9 +56,9 @@ class RunnerInteractive(_Runner, BannerMixin):
         self._ewrite(f"\n")
 
 
-class RunnerNonInteractive(_Runner):
+class RunnerDeclarative(_Runner):
     """Represents the method for the program to interact
-    with the users in non-interactive mode.
+    with the users in delcarative mode.
 
     Intended the case where the users feed the input from STDIN.
     """
@@ -71,11 +70,10 @@ class RunnerNonInteractive(_Runner):
         self._on_exit()
 
 
-class ExecuteSingle(ConsoleWriter, CliSingular, ABC):
+class ExecuteSingle(ConsoleWriter, IExecuteSingle, ABC):
     """Represents the runner with the interactive user interface
     that expects a single input of the prompt."""
 
-    _pipeline: IPromptPipeline
     _input_strategy: InputStrategy
 
     @abstractmethod
@@ -114,11 +112,10 @@ class _InputContext:
     state: _InputState = _InputState.FIRST_INPUT
 
 
-class ExecuteDual(ConsoleWriter, CliPlural, ABC):
+class ExecuteMultiple(ConsoleWriter, IExecuteMultiple, ABC):
     """Represents the runner with the interactive user interface
     that expects two different prompts."""
 
-    _pipeline: IPromptPipeline
     _input_strategy: InputStrategy
     _calculator: SetCalculatorWrapper
 

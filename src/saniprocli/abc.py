@@ -24,24 +24,39 @@ class CliRunnable(ABC):
         """Start processing."""
 
 
-class CliSingular(ABC):
+class IExecuteSingle(ABC):
     """Defines the basic interface for the class
     that represents the action for single input."""
-
-    @abstractmethod
-    def __init__(self, pipeline: IPromptPipeline, strategy: InputStrategy) -> None:
-        """Common constructor interface that handles the single input."""
 
     @abstractmethod
     def _execute_single(self, source: str) -> str:
         """Process the input prompt, and returns the text to show it later."""
 
 
-class CliPlural(ABC):
+class IExecuteMultiple(ABC):
     """Defines the basic interface for the class that
     represents the action for dual input."""
 
     @abstractmethod
+    def _execute_multi(self, first: str, second: str) -> str:
+        """Process the two prompts and return the text to show it later."""
+
+
+class RunnerFilter(ABC):
+    def __init__(self, pipeline: IPromptPipeline, strategy: InputStrategy) -> None:
+        """Common constructor interface that handles the single input."""
+
+        self._pipeline = pipeline
+        self._input_strategy = strategy
+
+
+class RunnerSetOperation(ABC):
+    """Represents the runner specialized for the set operation.
+
+    In set operation mode, the total number of tokens will be more
+    than prompt A or prompt B. Thus it is reasonable that showing
+    the difference between both prompt A and result, and prompt B and result."""
+
     def __init__(
         self,
         pipeline: IPromptPipeline,
@@ -51,9 +66,9 @@ class CliPlural(ABC):
         """Common constructor for handling two inputs.
         The `calculator` instance operates set calculation."""
 
-    @abstractmethod
-    def _execute_multi(self, first: str, second: str) -> str:
-        """Process the two prompts and return the text to show it later."""
+        self._pipeline = pipeline
+        self._input_strategy = strategy
+        self._calculator = calculator
 
 
 class ParserAppendable(ABC):

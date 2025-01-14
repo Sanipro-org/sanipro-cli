@@ -5,11 +5,9 @@ import os
 import readline
 import sys
 import typing
-from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from typing import NamedTuple
 
-import pyperclip
 from sanipro.abc import IPipelineResult, IPromptPipeline, MutablePrompt
 from sanipro.compatible import Self
 from sanipro.converter_context import TokenMap, get_config
@@ -42,26 +40,29 @@ from sanipro.filters.utils import (
     sort_lexicographically,
 )
 from sanipro.logger import logger, logger_root
-from sanipro.parser import DummyParser
 from sanipro.pipeline_v1 import PromptPipelineV1
 from sanipro.pipeline_v2 import ParserV2, PromptPipelineV2, PromptTokenizerV2
 from sanipro.pipelineresult import PipelineResult
 from sanipro.promptset import SetCalculatorWrapper
-from sanipro.tokenizer import SimpleTokenizer
 
-from saniprocli import cli_hooks, inputs
-from saniprocli.abc import CliRunnable, InputStrategy
+from saniprocli import inputs
+from saniprocli.abc import CliRunnable, InputStrategy, RunnerFilter, RunnerSetOperation
 from saniprocli.cli_runner import (
-    ExecuteDual,
+    ExecuteMultiple,
     ExecuteSingle,
+    RunnerDeclarative,
     RunnerInteractive,
-    RunnerNonInteractive,
 )
 from saniprocli.color import style
-from saniprocli.commands import CliArgsNamespaceDefault, CliCommands
+from saniprocli.commands import (
+    CliArgsNamespaceDefault,
+    CliCommand,
+    CliCommands,
+    SubparserInjectable,
+)
 from saniprocli.help_formatter import SaniproHelpFormatter
 from saniprocli.sanipro_argparse import SaniproArgumentParser
-from saniprocli.textutils import CsvUtils, dump_to_file, get_temp_filename
+from saniprocli.textutils import ClipboardHandler
 
 logging.basicConfig(
     format=(
@@ -97,26 +98,6 @@ class ModuleMatcher:
             return self.commands.list_commands()[method]
         except KeyError:
             raise ModuleNotFoundError
-
-
-class SubparserInjectable(ABC):
-    """The trait with the ability to inject a subparser."""
-
-    @classmethod
-    @abstractmethod
-    def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
-        """Injects subparser."""
-
-
-class CliCommand(SubparserInjectable):
-    """The wrapper class for the filter commands
-    with the addition of subparser."""
-
-    command_id: str
-
-    @classmethod
-    def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
-        """Does nothing by default."""
 
 
 class CliExcludeCommand(CliCommand):
@@ -453,88 +434,6 @@ class CliUniqueCommand(CliCommand):
         )
 
 
-class CliSubcommandSearchTag(SubparserInjectable):
-    command_id: str = "tfind"
-
-    @classmethod
-    def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
-        parser = subparser.add_parser(
-            name=cls.command_id,
-            formatter_class=SaniproHelpFormatter,
-            help=("Outputs the number of posts corresponds the tag specified."),
-            description=(
-                "In this mode a user specifies a CSV file acting as a key-value storage. "
-                "The first which is the `key` column corresponds to the name of the tag, "
-                "so do second which is the `value` column to the count of the assigned tag."
-            ),
-        )
-
-        parser.add_argument(
-            "infile",
-            type=argparse.FileType("r"),
-            help=(
-                "Specifies the text file comprised from two columns, "
-                "each separated with delimiter."
-            ),
-        )
-
-        parser.add_argument(
-            "-i",
-            "--interactive",
-            default=False,
-            action="store_true",
-            help=(
-                "Provides the REPL interface to play with prompts. "
-                "The program behaves like the Python interpreter."
-            ),
-        )
-
-        parser.add_argument(
-            "-k",
-            "--key-field",
-            default=1,
-            type=int,
-            help="Select this field number's element as a key.",
-        )
-
-        parser.add_argument(
-            "-v",
-            "--value-field",
-            default=2,
-            type=int,
-            help="Select this field number's element as a value.",
-        )
-
-        parser.add_argument(
-            "-d",
-            "--field-delimiter",
-            default=",",
-            type=str,
-            help="Use this character as a field separator.",
-        )
-
-        parser.add_argument(
-            "-t",
-            "--tempdir",
-            default="/dev/shm",
-            type=str,
-            help=(
-                "Use this directory as a tempfile storage. Technically speaking, "
-                "the program creates a new text file by extracting the field "
-                "from a csv file, format and save them so the GNU Readline "
-                "can read the histfile on this directory."
-            ),
-        )
-
-        parser.add_argument(
-            "-c",
-            "--clipboard",
-            default=False,
-            action="store_true",
-            help="Copy the result to the clipboard if possible.",
-        )
-
-
 class CliSubcommandFilter(SubparserInjectable):
     command_id: str = "filter"
 
@@ -720,12 +619,6 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
     kruskal: bool
     prim: bool
 
-    # for tfind subcommand
-    infile: typing.TextIO
-    key_field: int
-    value_field: int
-    field_delimiter: str
-    tempdir: str
     clipboard: bool
     fixed_prompt: typing.TextIO
     config: str
@@ -735,9 +628,6 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
 
     def is_filter(self) -> bool:
         return self.operation_id == CliSubcommandFilter.command_id
-
-    def is_tfind(self) -> bool:
-        return self.operation_id == CliSubcommandSearchTag.command_id
 
     def is_set_operation(self) -> bool:
         return self.operation_id == CliSubcommandSetOperation.command_id
@@ -784,7 +674,6 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
             CliSubcommandFilter,
             CliSubcommandSetOperation,
             CliSubcommandParserV2,
-            CliSubcommandSearchTag,
         ]
 
         for cmd in classes:
@@ -809,16 +698,6 @@ def prepare_readline() -> None:
     atexit.register(save, h_len, histfile)
 
 
-class ClipboardHandler:
-    @staticmethod
-    def copy_to_clipboard(text: str) -> None:
-        """Copy the text to clipboard."""
-        try:
-            pyperclip.copy(text)
-        except pyperclip.PyperclipException as e:
-            logger.warning(e)
-
-
 class StatisticsHandler:
     @staticmethod
     def show_cli_stat(result: IPipelineResult) -> None:
@@ -828,124 +707,7 @@ class StatisticsHandler:
             logger.info("(statistics) %s", line)
 
 
-class RunnerTagFindNonInteractive(ExecuteSingle, RunnerNonInteractive):
-    """Represents the runner specialized for the filtering mode."""
-
-    def __init__(
-        self,
-        pipeline: IPromptPipeline,
-        tags_n_count: dict[str, str],
-        strategy: InputStrategy,
-    ) -> None:
-        self._pipeline = pipeline
-        self._tokenizer = pipeline.tokenizer
-        self._input_strategy = strategy
-        self.tags_n_count: dict[str, str] = tags_n_count
-        self._histfile = ""
-
-    @classmethod
-    def create_from_csv(
-        cls,
-        pipeline: IPromptPipeline,
-        text: typing.TextIO,
-        strategy: InputStrategy,
-        delim: str,
-        key_idx: int,
-        value_idx: int,
-    ) -> Self:
-        """Import the key-value storage from a comma-separated file.
-        The index starts from 1. This is because common traditional command-line
-        utilities assume the field index originates from 1."""
-        try:
-            tags_n_count = CsvUtils.create_dict_from_io(text, delim, key_idx, value_idx)
-            return cls(pipeline, tags_n_count, strategy)
-        except IndexError:
-            raise
-
-    def _execute_single_inner(self, source: str) -> str:
-        tokens = [
-            "%s\t%s" % (str(token), self.tags_n_count.get(token.name, "null"))
-            for token in self._tokenizer.tokenize_prompt(source)
-        ]
-        return self._pipeline.delimiter.sep_output.join(tokens)
-
-
-class RunnerTagFindInteractive(ExecuteSingle, RunnerInteractive):
-    """Represents the runner specialized for the filtering mode."""
-
-    _histfile: str
-
-    def __init__(
-        self,
-        pipeline: IPromptPipeline,
-        tags_n_count: dict[str, str],
-        strategy: InputStrategy,
-        tempdir: str,
-        use_clipboard: bool,
-    ) -> None:
-        self._pipeline = pipeline
-        self._tokenizer = pipeline.tokenizer
-        self._input_strategy = strategy
-        self.tags_n_count: dict[str, str] = tags_n_count
-        self.tempdir = tempdir
-        self._use_clipboard = use_clipboard
-
-    @classmethod
-    def create_from_csv(
-        cls,
-        pipeline: IPromptPipeline,
-        text: typing.TextIO,
-        strategy: InputStrategy,
-        delim: str,
-        key_idx: int,
-        value_idx: int,
-        tempdir: str,
-        use_clipboard: bool,
-    ) -> Self:
-        """Import the key-value storage from a comma-separated file.
-        The index starts from 1. This is because common traditional command-line
-        utilities assume the field index originates from 1.
-
-        The `tempdir` is used to store the history file for the GNU Readline.
-        """
-        try:
-            tag_n_count = CsvUtils.create_dict_from_io(text, delim, key_idx, value_idx)
-            return cls(pipeline, tag_n_count, strategy, tempdir, use_clipboard)
-        except IndexError as e:
-            raise type(e)
-
-    def _on_init(self) -> None:
-        histfile = get_temp_filename(self.tempdir)
-        dump_to_file(histfile, self.tags_n_count.keys())
-
-        try:
-            readline.read_history_file(histfile)
-        except FileNotFoundError as e:
-            raise type(e)("failed to read history file: %s" % (histfile,))
-
-        # so that the file is deleted after the program exits
-        self._histfile = histfile
-
-    def _on_exit(self) -> None:
-        try:
-            os.remove(self._histfile)
-        except OSError:
-            logger.warning("%s: history file was not deleted", self._histfile)
-
-    def _execute_single_inner(self, source: str) -> str:
-        tokens = [
-            "%s\t%s" % (str(token), self.tags_n_count.get(token.name, "null"))
-            for token in self._tokenizer.tokenize_prompt(source)
-        ]
-        selialized = self._pipeline.delimiter.sep_output.join(tokens)
-
-        if self._use_clipboard:
-            ClipboardHandler.copy_to_clipboard(selialized)
-
-        return selialized
-
-
-class RunnerFilterInteractive(ExecuteSingle, RunnerInteractive):
+class RunnerFilterInteractive(ExecuteSingle, RunnerInteractive, RunnerFilter):
     """Represents the runner specialized for the filtering mode."""
 
     def __init__(
@@ -955,9 +717,8 @@ class RunnerFilterInteractive(ExecuteSingle, RunnerInteractive):
         detector: type[PromptDifferenceDetector],
         use_clipboard: bool,
     ) -> None:
-        self._pipeline = pipeline
+        super().__init__(pipeline, strategy)
         self._token_cls = pipeline.tokenizer.token_cls
-        self._input_strategy = strategy
 
         self._detector_cls = detector
         self._use_clipboard = use_clipboard
@@ -974,26 +735,21 @@ class RunnerFilterInteractive(ExecuteSingle, RunnerInteractive):
         return selialized
 
 
-class RunnerFilterNonInteractive(ExecuteSingle, RunnerNonInteractive):
+class RunnerFilterDeclarative(ExecuteSingle, RunnerDeclarative, RunnerFilter):
     """Represents the runner specialized for the filtering mode."""
 
     def __init__(self, pipeline: IPromptPipeline, strategy: InputStrategy) -> None:
-        self._pipeline = pipeline
+        super().__init__(pipeline, strategy)
         self._token_cls = pipeline.tokenizer.token_cls
-        self._input_strategy = strategy
 
     def _execute_single_inner(self, source: str) -> str:
         self._pipeline.execute(source)
         return str(self._pipeline)
 
 
-class RunnerSetOperationInteractiveDual(ExecuteDual, RunnerInteractive):
-    """Represents the runner specialized for the set operation.
-
-    In set operation mode, the total number of tokens will be more
-    than prompt A or prompt B. Thus it is reasonable that showing
-    the difference between both prompt A and result, and prompt B and result."""
-
+class RunnerSetOperationInteractiveDual(
+    ExecuteMultiple, RunnerInteractive, RunnerSetOperation
+):
     def __init__(
         self,
         pipeline: IPromptPipeline,
@@ -1002,11 +758,9 @@ class RunnerSetOperationInteractiveDual(ExecuteDual, RunnerInteractive):
         detector: type[PromptDifferenceDetector],
         use_clipboard: bool,
     ) -> None:
-        self._pipeline = pipeline
-        self._tokenizer = self._pipeline.tokenizer
-        self._input_strategy = strategy
+        super().__init__(pipeline, strategy, calculator)
 
-        self._calculator = calculator
+        self._tokenizer = pipeline.tokenizer
         self._detector_cls = detector
         self._use_clipboard = use_clipboard
 
@@ -1018,7 +772,6 @@ class RunnerSetOperationInteractiveDual(ExecuteDual, RunnerInteractive):
             self._tokenizer.token_cls(name=x.name, weight=x.weight)
             for x in self._calculator.do_math(prompt_first_before, prompt_second_before)
         ]
-        self._pipeline = self._pipeline
 
         logger.info("(statistics) prompt A <> result")
         StatisticsHandler.show_cli_stat(PipelineResult(prompt_first_before, prompt))
@@ -1034,8 +787,9 @@ class RunnerSetOperationInteractiveDual(ExecuteDual, RunnerInteractive):
         return selialized
 
 
-class RunnerSetOperationIteractiveMono(ExecuteSingle, RunnerNonInteractive):
-
+class RunnerSetOperationDeclarativeMono(
+    ExecuteSingle, RunnerDeclarative, RunnerSetOperation
+):
     def __init__(
         self,
         pipeline: IPromptPipeline,
@@ -1045,11 +799,9 @@ class RunnerSetOperationIteractiveMono(ExecuteSingle, RunnerNonInteractive):
         fixed_prompt: MutablePrompt,
         use_clipboard: bool,
     ) -> None:
-        self._pipeline = pipeline
+        super().__init__(pipeline, strategy, calculator)
         self._tokenizer = self._pipeline.tokenizer
-        self._input_strategy = strategy
 
-        self._calculator = calculator
         self._detector_cls = detector
         self._fixed_prompt = fixed_prompt
         self._use_clipboard = use_clipboard
@@ -1090,6 +842,9 @@ class CliCommandsDemo(CliCommands):
         self._args = args
         self._config = get_config(self._args.config)
 
+        self.input_type = self._config.get_input_token_class(self._args.input_type)
+        self.output_type = self._config.get_output_token_class(self._args.output_type)
+
     def _get_input_strategy(self) -> InputStrategy:
         if not self._args.interactive:
             return inputs.DirectInputStrategy()
@@ -1125,28 +880,19 @@ class CliCommandsDemo(CliCommands):
         return delimiter
 
     def _initialize_pipeline(self) -> IPromptPipeline:
-
-        itype = self._config.get_input_token_class(self._args.input_type)
-        otype = self._config.get_output_token_class(self._args.output_type)
-
-        formatter = self._initialize_formatter(otype)
+        formatter = self._initialize_formatter(self.output_type)
         filter_pipe = self._initialize_filter_pipeline()
-        delimiter = self._initialize_delimiter(itype)
+        delimiter = self._initialize_delimiter(self.input_type)
 
         if self._args.is_parser_v2():
             parser = ParserV2()
-            token_type = itype.token_type
+            token_type = self.input_type.token_type
             tokenizer = PromptTokenizerV2(parser, token_type)
             return PromptPipelineV2(tokenizer, filter_pipe)
-        elif self._args.is_tfind():
-            parser = DummyParser(delimiter)
-            token_type = itype.token_type
-            tokenizer = SimpleTokenizer(parser, token_type)
-            return PromptPipelineV1(tokenizer, filter_pipe, formatter)
         else:
-            parser = itype.parser(delimiter)
-            token_type = otype.token_type
-            tokenizer = itype.tokenizer(parser, token_type)
+            parser = self.input_type.parser(delimiter)
+            token_type = self.output_type.token_type
+            tokenizer = self.input_type.tokenizer(parser, token_type)
             return PromptPipelineV1(tokenizer, filter_pipe, formatter)
 
     def _initialize_filter_pipeline(self) -> FilterExecutor:
@@ -1161,8 +907,9 @@ class CliCommandsDemo(CliCommands):
             filterpipe.append_command(CliExcludeCommand(self._args.exclude).command)
 
         # add filter to for converting token type
-        token_type = self._config.get_output_token_class(self._args.output_type)
-        filterpipe.append_command(TranslateTokenTypeCommand(token_type.token_type))
+        filterpipe.append_command(
+            TranslateTokenTypeCommand(self.output_type.token_type)
+        )
 
         return filterpipe
 
@@ -1170,22 +917,16 @@ class CliCommandsDemo(CliCommands):
         """Returns a runner."""
         input_strategy = self._get_input_strategy()
 
-        if not self._args.is_tfind():
-            cli_hooks.on_init.append(prepare_readline)
-            cli_hooks.execute(cli_hooks.on_init)
-
         if self._args.is_filter() or self._args.is_parser_v2():
             if self._args.interactive:
                 return RunnerFilterInteractive(
                     pipe, input_strategy, PromptDifferenceDetector, self._args.clipboard
                 )
-            return RunnerFilterNonInteractive(pipe, input_strategy)
+            return RunnerFilterDeclarative(pipe, input_strategy)
 
         elif self._args.is_set_operation():
             calculator = SetCalculatorWrapper.create_from(self._args.set_op_id)
-
             if self._args.interactive:
-
                 return RunnerSetOperationInteractiveDual(
                     pipe,
                     input_strategy,
@@ -1194,8 +935,7 @@ class CliCommandsDemo(CliCommands):
                     self._args.clipboard,
                 )
             else:
-
-                return RunnerSetOperationIteractiveMono.create_from_text(
+                return RunnerSetOperationDeclarativeMono.create_from_text(
                     pipe,
                     input_strategy,
                     calculator,
@@ -1203,28 +943,6 @@ class CliCommandsDemo(CliCommands):
                     self._args.fixed_prompt,
                     self._args.clipboard,
                 )
-        elif self._args.is_tfind():
-            if self._args.interactive:
-
-                return RunnerTagFindInteractive.create_from_csv(
-                    pipeline=pipe,
-                    text=self._args.infile,
-                    strategy=input_strategy,
-                    delim=self._args.field_delimiter,
-                    key_idx=self._args.key_field,
-                    value_idx=self._args.value_field,
-                    tempdir=self._args.tempdir,
-                    use_clipboard=self._args.clipboard,
-                )
-
-            return RunnerTagFindNonInteractive.create_from_csv(
-                pipeline=pipe,
-                text=self._args.infile,
-                strategy=input_strategy,
-                delim=self._args.field_delimiter,
-                key_idx=self._args.key_field,
-                value_idx=self._args.value_field,
-            )
         else:  # default
             raise NotImplementedError
 
