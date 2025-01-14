@@ -314,10 +314,9 @@ class CliCommandsDemo(CliCommands):
         input_strategy = self._get_input_strategy()
 
         fmt_mapping = {
-            "default": Formatter.default,
-            "a1111": Formatter.to_a1111,
             "a1111compat": Formatter.to_a1111_compat,
-            "csv": Formatter.default,
+            "a1111": Formatter.to_a1111,
+            "csv": Formatter.to_csv,
         }
 
         formatter = None
