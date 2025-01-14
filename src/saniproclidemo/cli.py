@@ -10,7 +10,12 @@ from typing import NamedTuple
 
 from sanipro.abc import IPipelineResult, IPromptPipeline, MutablePrompt
 from sanipro.compatible import Self
-from sanipro.converter_context import TokenMap, get_config
+from sanipro.converter_context import (
+    SupportedInTokenType,
+    SupportedOutTokenType,
+    TokenMap,
+    get_config,
+)
 from sanipro.delimiter import Delimiter
 from sanipro.diff import PromptDifferenceDetector
 from sanipro.filter_exec import FilterExecutor
@@ -597,6 +602,8 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
     """Custom subcommand implementation by user"""
 
     # global options
+    input_type: str
+    output_type: str
     interactive: bool
     exclude: Sequence[str]
     roundup = 2
@@ -634,6 +641,25 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
 
     @classmethod
     def _do_append_parser(cls, parser: SaniproArgumentParser) -> None:
+
+        parser.add_argument(
+            "-d",
+            "--input-type",
+            type=str,
+            choices=SupportedInTokenType.choises(),
+            default="a1111compat",
+            help=("Preferred token type for the original prompts."),
+        )
+
+        parser.add_argument(
+            "-s",
+            "--output-type",
+            type=str,
+            choices=SupportedOutTokenType.choises(),
+            default="a1111compat",
+            help=("Preferred token type for the processed prompts."),
+        )
+
         parser.add_argument(
             "-u",
             "--roundup",

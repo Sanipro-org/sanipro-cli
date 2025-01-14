@@ -22,7 +22,11 @@ class CSVUtilsBase(ABC):
             raise ValueError("impossible to specify the same field number")
 
     def preprocess(self, lines: list[str]) -> Generator[list[str], None, None]:
-        return (self._do_preprocess(line.split(self.delim)) for line in lines)
+        for line in lines:
+            line = line.strip()
+            columns = line.split(self.delim)
+            processed = self._do_preprocess(columns)
+            yield processed
 
     @abstractmethod
     def _do_preprocess(self, column: list[str]) -> list[str]:
@@ -47,6 +51,8 @@ class CSVUtilsBase(ABC):
         """A helper function for creating the dictionary from the CSV file."""
 
         text, *rest, key_idx, value_idx = args
+
+        # NOTE: meaning dict file is always delimited by line breaks. is it good thing?
         lines = text
         return cls(lines, *rest).prepare_kv(key_idx, value_idx)
 

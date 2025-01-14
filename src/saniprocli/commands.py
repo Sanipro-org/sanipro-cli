@@ -5,7 +5,6 @@ from collections.abc import Sequence
 
 from sanipro.abc import IPromptPipeline
 from sanipro.compatible import Self
-from sanipro.converter_context import SupportedInTokenType, SupportedOutTokenType
 from sanipro.utils import HasPrettyRepr
 
 from saniprocli.abc import (
@@ -22,9 +21,7 @@ from saniprocli.sanipro_argparse import SaniproArgumentParser
 class CliArgsNamespaceDefault(HasPrettyRepr, ParserAppendable, SubParserAppendable):
     """Default namespace for the argparser."""
 
-    input_type: str
     one_line: bool
-    output_type: str
     ps1: str
     ps2: str
     verbose: int
@@ -32,24 +29,6 @@ class CliArgsNamespaceDefault(HasPrettyRepr, ParserAppendable, SubParserAppendab
     @classmethod
     def _append_parser(cls, parser: SaniproArgumentParser) -> None:
         """Add parser for functions included by default."""
-
-        parser.add_argument(
-            "-d",
-            "--input-type",
-            type=str,
-            choices=SupportedInTokenType.choises(),
-            default="a1111compat",
-            help=("Preferred token type for the original prompts."),
-        )
-
-        parser.add_argument(
-            "-s",
-            "--output-type",
-            type=str,
-            choices=SupportedOutTokenType.choises(),
-            default="a1111compat",
-            help=("Preferred token type for the processed prompts."),
-        )
 
         parser.add_argument(
             "-l",
