@@ -46,7 +46,6 @@ from sanipro.filters.utils import (
 )
 from sanipro.logger import logger, logger_root
 from sanipro.pipeline_v1 import PromptPipelineV1
-from sanipro.pipeline_v2 import ParserV2, PromptPipelineV2, PromptTokenizerV2
 from sanipro.pipelineresult import PipelineResult
 from sanipro.promptset import SetCalculatorWrapper
 
@@ -563,41 +562,6 @@ class CliSubcommandSetOperation(SubparserInjectable):
         )
 
 
-class CliSubcommandParserV2(SubparserInjectable):
-    command_id: str = "parserv2"
-
-    @classmethod
-    def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
-        parser = subparser.add_parser(
-            name=cls.command_id,
-            formatter_class=SaniproHelpFormatter,
-            help=("Switch to use another version of the parser instead."),
-            description=(
-                "Switch to use another version of the parser instead. "
-                "It only parses the prompt and does nothing at all."
-            ),
-        )
-
-        parser.add_argument(
-            "-i",
-            "--interactive",
-            default=False,
-            action="store_true",
-            help=(
-                "Provides the REPL interface to play with prompts. "
-                "The program behaves like the Python interpreter."
-            ),
-        )
-
-        parser.add_argument(
-            "-c",
-            "--clipboard",
-            default=False,
-            action="store_true",
-            help="Copy the result to the clipboard if possible.",
-        )
-
-
 class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
     """Custom subcommand implementation by user"""
 
@@ -629,9 +593,6 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
     clipboard: bool
     fixed_prompt: typing.TextIO
     config: str
-
-    def is_parser_v2(self) -> bool:
-        return self.operation_id == CliSubcommandParserV2.command_id
 
     def is_filter(self) -> bool:
         return self.operation_id == CliSubcommandFilter.command_id
@@ -699,7 +660,6 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
         classes: list[type[SubparserInjectable]] = [
             CliSubcommandFilter,
             CliSubcommandSetOperation,
-            CliSubcommandParserV2,
         ]
 
         for cmd in classes:
@@ -910,16 +870,10 @@ class CliCommandsDemo(CliCommands):
         filter_pipe = self._initialize_filter_pipeline()
         delimiter = self._initialize_delimiter(self.input_type)
 
-        if self._args.is_parser_v2():
-            parser = ParserV2()
-            token_type = self.input_type.token_type
-            tokenizer = PromptTokenizerV2(parser, token_type)
-            return PromptPipelineV2(tokenizer, filter_pipe)
-        else:
-            parser = self.input_type.parser(delimiter)
-            token_type = self.output_type.token_type
-            tokenizer = self.input_type.tokenizer(parser, token_type)
-            return PromptPipelineV1(tokenizer, filter_pipe, formatter)
+        parser = self.input_type.parser(delimiter)
+        token_type = self.output_type.token_type
+        tokenizer = self.input_type.tokenizer(parser, token_type)
+        return PromptPipelineV1(tokenizer, filter_pipe, formatter)
 
     def _initialize_filter_pipeline(self) -> FilterExecutor:
         filterpipe = FilterExecutor()
@@ -946,7 +900,7 @@ class CliCommandsDemo(CliCommands):
         cli_hooks.on_init.append(prepare_readline)
         cli_hooks.execute(cli_hooks.on_init)
 
-        if self._args.is_filter() or self._args.is_parser_v2():
+        if self._args.is_filter():
             if self._args.interactive:
                 return RunnerFilterInteractive(
                     pipe, input_strategy, PromptDifferenceDetector, self._args.clipboard
