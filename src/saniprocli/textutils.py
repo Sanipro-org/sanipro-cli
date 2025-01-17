@@ -1,8 +1,6 @@
-import tempfile
 from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterable
 
-import pyperclip
 from sanipro.logger import logger
 
 
@@ -61,6 +59,8 @@ def get_temp_filename(tmp_dir: str) -> str:
     """Returns a temporary filename.
     The temporary file must be deleted after calling this function."""
 
+    import tempfile
+
     _tmpfile = tempfile.NamedTemporaryFile(dir=tmp_dir, delete=False)
     filename = _tmpfile.name
     _tmpfile.close()
@@ -79,6 +79,8 @@ class ClipboardHandler:
     @staticmethod
     def copy_to_clipboard(text: str) -> None:
         """Copy the text to clipboard."""
+        import pyperclip
+
         try:
             pyperclip.copy(text)
         except pyperclip.PyperclipException as e:

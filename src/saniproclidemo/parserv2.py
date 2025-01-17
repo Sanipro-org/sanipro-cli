@@ -4,14 +4,14 @@ import os
 import readline
 import sys
 from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING
 
 from sanipro.abc import IPipelineResult, IPromptPipeline
-from sanipro.converter_context import (
-    SupportedInTokenType,
-    SupportedOutTokenType,
-    TokenMap,
-    get_config,
-)
+from sanipro.token_types import SupportedInTokenType, SupportedOutTokenType
+
+if TYPE_CHECKING:
+    from sanipro.converter_context import TokenMap
+
 from sanipro.delimiter import Delimiter
 from sanipro.diff import PromptDifferenceDetector
 from sanipro.filter_exec import FilterExecutor
@@ -202,6 +202,8 @@ class RunnerFilterDeclarative(ExecuteSingle, RunnerDeclarative, RunnerFilter):
 
 class CliCommandsDemo(CliCommands):
     def __init__(self, args: CliArgsNamespaceDemo) -> None:
+        from sanipro.converter_context import get_config
+
         self._args = args
         self._config = get_config(self._args.config)
 
@@ -221,7 +223,7 @@ class CliCommandsDemo(CliCommands):
             else inputs.MultipleInputStrategy(ps1, ps2)
         )
 
-    def _initialize_formatter(self, token_map: TokenMap) -> Callable:
+    def _initialize_formatter(self, token_map: "TokenMap") -> Callable:
         """Initialize formatter function which takes an only 'Token' class.
         Note when 'csv' is chosen as Token, the token_map.formatter is
         a partial function."""
@@ -234,7 +236,7 @@ class CliCommandsDemo(CliCommands):
 
         return formatter
 
-    def _initialize_delimiter(self, itype: TokenMap) -> Delimiter:
+    def _initialize_delimiter(self, itype: "TokenMap") -> Delimiter:
         its = self._config.get_input_token_separator(self._args.input_type)
         ots = self._config.get_output_token_separator(self._args.output_type)
         ifs = itype.field_separator

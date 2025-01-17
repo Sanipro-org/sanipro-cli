@@ -1,7 +1,6 @@
 import sys
 
 from saniprocli.abc import InputStrategy
-from saniprocli.color import style_for_readline
 from saniprocli.console import ConsoleWriter
 
 
@@ -50,7 +49,10 @@ class OnelineInputStrategy(InputStrategy, ConsoleWriter):
         return f"{type(self).__name__}(ps1={self.ps1})"
 
     def input(self) -> str:
+        from saniprocli.color import style_for_readline
+
         prompt = self.ps1
+
         try:
             return input_last_break(style_for_readline(prompt))
         except KeyboardInterrupt:
@@ -79,6 +81,8 @@ class MultipleInputStrategy(InputStrategy, ConsoleWriter):
         return f"{type(self).__name__}(ps1={self.ps1}, ps2={self.ps2})"
 
     def input(self) -> str:
+        from saniprocli.color import style_for_readline
+
         buffer = []
         _current_prompt = self.ps1
         _initial_prompt = _current_prompt

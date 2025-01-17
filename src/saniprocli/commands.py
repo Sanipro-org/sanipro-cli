@@ -74,7 +74,7 @@ class CliArgsNamespaceDefault(HasPrettyRepr, ParserAppendable, SubParserAppendab
 
     @classmethod
     def _do_append_parser(cls, parser: SaniproArgumentParser) -> None:
-        raise NotImplementedError
+        """User-defined parser implementation."""
 
     @classmethod
     def _append_subparser(cls, parser: SaniproArgumentParser) -> None:
@@ -82,23 +82,35 @@ class CliArgsNamespaceDefault(HasPrettyRepr, ParserAppendable, SubParserAppendab
 
     @classmethod
     def _do_append_subparser(cls, parser: SaniproArgumentParser) -> None:
-        raise NotImplementedError
+        """User-defined parser implementation."""
+
+    @classmethod
+    def _do_get_parser(cls) -> dict:
+        return {
+            "prog": "sanipro",
+            "description": (
+                "Toolbox for Stable Diffusion prompts. "
+                "'Sanipro' stands for 'pro'mpt 'sani'tizer."
+            ),
+            "epilog": "Help for each filter is available, respectively.",
+        }
+
+    @classmethod
+    def _get_parser(cls) -> SaniproArgumentParser:
+        props = cls._do_get_parser()
+        return SaniproArgumentParser(
+            prog=props["prog"],
+            description=props["description"],
+            formatter_class=SaniproHelpFormatter,
+            epilog=props["epilog"],
+        )
 
     @classmethod
     def from_sys_argv(cls, arg_val: Sequence[str]) -> Self:
         """Add parsers, and parse the commandline argument with it."""
 
-        parser = SaniproArgumentParser(
-            prog="sanipro",
-            description=(
-                "Toolbox for Stable Diffusion prompts. "
-                "'Sanipro' stands for 'pro'mpt 'sani'tizer."
-            ),
-            formatter_class=SaniproHelpFormatter,
-            epilog="Help for each filter is available, respectively.",
-        )
+        parser = cls._get_parser()
 
-        # logger.debug("arg_val: %s", arg_val)
         cls._append_parser(parser)
         cls._append_subparser(parser)
 

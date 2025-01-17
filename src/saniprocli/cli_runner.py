@@ -4,9 +4,8 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 from sanipro.logger import logger
-from sanipro.promptset import SetCalculatorWrapper
 
-from saniprocli import cli_hooks, color
+from saniprocli import cli_hooks
 from saniprocli.abc import CliRunnable, IExecuteMultiple, IExecuteSingle, InputStrategy
 from saniprocli.console import ConsoleWriter
 
@@ -116,6 +115,8 @@ class ExecuteMultiple(ConsoleWriter, IExecuteMultiple, ABC):
     """Represents the runner with the interactive user interface
     that expects two different prompts."""
 
+    from sanipro.promptset import SetCalculatorWrapper
+
     _input_strategy: InputStrategy
     _calculator: SetCalculatorWrapper
 
@@ -147,13 +148,13 @@ class ExecuteMultiple(ConsoleWriter, IExecuteMultiple, ABC):
         return _InputState.FIRST_INPUT
 
     def _handle_second_input(self) -> _InputState:
-        color.color_foreground = "green"
+        self.color.color_foreground = "green"
         try:
             self._ctx.second = self._handle_input()
             if self._ctx.second:
                 return _InputState.EXECUTE
         except EOFError:
-            color.color_foreground = self._ctx.original_color
+            self.color.color_foreground = self._ctx.original_color
             return _InputState.FIRST_INPUT
         return _InputState.SECOND_INPUT
 
@@ -161,9 +162,10 @@ class ExecuteMultiple(ConsoleWriter, IExecuteMultiple, ABC):
         out = self._execute_multi(self._ctx.first, self._ctx.second)
         if out:
             self._write(f"{out}\n")
-        color.color_foreground = self._ctx.original_color
+        self.color.color_foreground = self._ctx.original_color
 
     def _process_state(self) -> bool:
+
         handlers = {
             _InputState.FIRST_INPUT: self._handle_first_input,
             _InputState.SECOND_INPUT: self._handle_second_input,
@@ -178,6 +180,10 @@ class ExecuteMultiple(ConsoleWriter, IExecuteMultiple, ABC):
         return True
 
     def _start_loop(self) -> None:
+        from saniprocli import color
+
+        self.color = color
+
         while True:
             try:
                 self._ctx = _InputContext(original_color=color.color_foreground)

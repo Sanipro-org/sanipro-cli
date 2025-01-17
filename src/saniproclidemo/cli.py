@@ -6,16 +6,15 @@ import readline
 import sys
 import typing
 from collections.abc import Callable, Sequence
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from sanipro.abc import IPipelineResult, IPromptPipeline, MutablePrompt
 from sanipro.compatible import Self
-from sanipro.converter_context import (
-    SupportedInTokenType,
-    SupportedOutTokenType,
-    TokenMap,
-    get_config,
-)
+from sanipro.token_types import SupportedInTokenType, SupportedOutTokenType
+
+if TYPE_CHECKING:
+    from sanipro.converter_context import TokenMap
+
 from sanipro.delimiter import Delimiter
 from sanipro.diff import PromptDifferenceDetector
 from sanipro.filter_exec import FilterExecutor
@@ -45,8 +44,6 @@ from sanipro.filters.utils import (
     sort_lexicographically,
 )
 from sanipro.logger import logger, logger_root
-from sanipro.pipeline_v1 import PromptPipelineV1
-from sanipro.pipelineresult import PipelineResult
 from sanipro.promptset import SetCalculatorWrapper
 
 from saniprocli import cli_hooks, inputs
@@ -69,8 +66,8 @@ from saniprocli.sanipro_argparse import SaniproArgumentParser
 from saniprocli.textutils import ClipboardHandler
 
 logging.basicConfig(
-    format=(
-        style("[%(levelname)s] %(module)s/%(funcName)s (%(lineno)d):") + " %(message)s"
+    format=style(
+        ("[%(levelname)s] %(module)s/%(funcName)s (%(lineno)d):") + " %(message)s"
     ),
     datefmt=r"%Y-%m-%d %H:%M:%S",
 )
@@ -751,6 +748,8 @@ class RunnerSetOperationInteractiveDual(
         self._use_clipboard = use_clipboard
 
     def _execute_multi_inner(self, first: str, second: str) -> str:
+        from sanipro.pipelineresult import PipelineResult
+
         prompt_first_before = self._tokenizer.tokenize_prompt(first)
         prompt_second_before = self._tokenizer.tokenize_prompt(second)
 
@@ -825,9 +824,10 @@ class RunnerSetOperationDeclarativeMono(
 
 class CliCommandsDemo(CliCommands):
     def __init__(self, args: CliArgsNamespaceDemo) -> None:
+        from sanipro.converter_context import get_config
+
         self._args = args
         self._config = get_config(self._args.config)
-
         self.input_type = self._config.get_input_token_class(self._args.input_type)
         self.output_type = self._config.get_output_token_class(self._args.output_type)
 
@@ -844,7 +844,7 @@ class CliCommandsDemo(CliCommands):
             else inputs.MultipleInputStrategy(ps1, ps2)
         )
 
-    def _initialize_formatter(self, token_map: TokenMap) -> Callable:
+    def _initialize_formatter(self, token_map: "TokenMap") -> Callable:
         """Initialize formatter function which takes an only 'Token' class.
         Note when 'csv' is chosen as Token, the token_map.formatter is
         a partial function."""
@@ -857,7 +857,7 @@ class CliCommandsDemo(CliCommands):
 
         return formatter
 
-    def _initialize_delimiter(self, itype: TokenMap) -> Delimiter:
+    def _initialize_delimiter(self, itype: "TokenMap") -> Delimiter:
         its = self._config.get_input_token_separator(self._args.input_type)
         ots = self._config.get_output_token_separator(self._args.output_type)
         ifs = itype.field_separator
@@ -866,6 +866,8 @@ class CliCommandsDemo(CliCommands):
         return delimiter
 
     def _initialize_pipeline(self) -> IPromptPipeline:
+        from sanipro.pipeline_v1 import PromptPipelineV1
+
         formatter = self._initialize_formatter(self.output_type)
         filter_pipe = self._initialize_filter_pipeline()
         delimiter = self._initialize_delimiter(self.input_type)
