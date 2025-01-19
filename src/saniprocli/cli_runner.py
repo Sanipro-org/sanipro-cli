@@ -94,7 +94,7 @@ class ExecuteSingle(ConsoleWriter, IExecuteSingle, ABC):
                 except EOFError:
                     break
             except Exception as e:  # like unclosed parentheses
-                logger.fatal(f"error: {e}")
+                logger.exception(f"error: {e}")
 
 
 class _InputState(Enum):
@@ -136,7 +136,7 @@ class ExecuteMultiple(ConsoleWriter, IExecuteMultiple, ABC):
             except EOFError:
                 raise EOFError("EOF received. Going back to previous state.")
             except Exception as e:
-                logger.fatal(f"error: {e}")
+                logger.exception(f"error: {e}")
 
     def _handle_first_input(self) -> _InputState:
         try:
