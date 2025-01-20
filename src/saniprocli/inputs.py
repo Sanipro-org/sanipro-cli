@@ -22,7 +22,7 @@ class DirectInputStrategy(InputStrategy):
 
     def input(self) -> str:
         """Preserves line breaks."""
-        bufs = []
+        bufs: list[str] = []
         while True:
             try:
                 chunk = sys.stdin.readline()
