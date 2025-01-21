@@ -17,11 +17,13 @@ import logging
 import os
 import readline
 import sys
+import typing
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
 from sanipro.abc import IPipelineResult, IPromptPipeline
 from sanipro.compatible import Self
+from sanipro.converter_context import Config, config_from_file, get_config
 from sanipro.token_types import SupportedInTokenType, SupportedOutTokenType
 
 if TYPE_CHECKING:
@@ -69,13 +71,6 @@ from saniprocli.help_formatter import SaniproHelpFormatter
 from saniprocli.sanipro_argparse import SaniproArgumentParser
 from saniprocli.textutils import ClipboardHandler
 
-logging.basicConfig(
-    format=style(
-        ("[%(levelname)s] %(module)s/%(funcName)s (%(lineno)d):") + " %(message)s"
-    ),
-    datefmt=r"%Y-%m-%d %H:%M:%S",
-)
-
 
 class SubparserInjectable(abc.ABC):
     """The trait with the ability to inject a subparser."""
@@ -107,15 +102,16 @@ class CliExcludeCommand(CliCommand):
 
     @classmethod
     def get_parser(cls) -> SaniproArgumentParser:
-        subcommand = SaniproArgumentParser(cls.command_id)
-        subcommand.add_argument(
+        parser = SaniproArgumentParser(
+            cls.command_id, formatter_class=SaniproHelpFormatter
+        )
+        parser.add_argument(
             "-x",
             "--exclude",
-            type=str,
             nargs="*",
             help="Exclude this token from the original prompt. Multiple options can be specified.",
         )
-        return subcommand
+        return parser
 
 
 class CliSimilarCommand(CliCommand):
@@ -189,11 +185,10 @@ class CliMaskCommand(CliCommand):
             epilog="Note that you can still use the global `--exclude` option"
             "as well as this filter.",
         )
-        parser.add_argument("mask", nargs="*", type=str, help="Masks this word.")
+        parser.add_argument("mask", nargs="*", help="Masks this word.")
         parser.add_argument(
             "-t",
             "--replace-to",
-            type=str,
             default=r"%%%",
             help="The new character or string replaced to.",
         )
@@ -366,87 +361,83 @@ class CliArgsNamespaceDemo:
     interactive: bool
     roundup = 2
     clipboard: bool
-    config: str
+    config: Config
+    color: bool
 
     @classmethod
     def _append_parser(cls, parser: SaniproArgumentParser) -> None:
         """Add parser for functions included by default."""
-        cls._do_append_parser(parser)
 
-    @classmethod
-    def _do_append_parser(cls, parser: SaniproArgumentParser) -> None:
         parser.add_argument(
             "-c",
             "--config",
-            type=str,
-            default=None,
+            default=get_config(None),
+            type=config_from_file,
             help="Specifies a config file for each token type.",
         )
+
         parser.add_argument(
             "-d",
             "--input-type",
-            type=str,
             choices=SupportedInTokenType.choises(),
             default="a1111compat",
             help="Preferred token type for the original prompts.",
         )
+
+        parser.add_argument(
+            "--color", action="store_true", help="Uses color for displaying."
+        )
+
         parser.add_argument(
             "-l",
             "--one-line",
-            default=False,
+            # default=bool,
             action="store_true",
             help="Whether to confirm the prompt input with a single line of input.",
         )
+
         parser.add_argument(
             "-p",
             "--ps1",
             default=">>> ",
-            type=str,
             help="The custom string that is used to wait for the user input of the prompts.",
         )
+
         parser.add_argument(
             "-s",
             "--output-type",
-            type=str,
             choices=SupportedOutTokenType.choises(),
             default="a1111compat",
             help="Preferred token type for the processed prompts.",
         )
+
         parser.add_argument(
             "-v",
             "--verbose",
             default=0,
             action="count",
-            help="Switch to display the extra logs for nerds, This may be useful for debugging.  Adding more flags causes your terminal more messier.",
+            help="Switch to display the extra logs for nerds, This may be useful for debugging. Adding more flags causes your terminal more messier.",
         )
+
         parser.add_argument(
             "-y",
             "--clipboard",
-            default=False,
             action="store_true",
             help="Copy the result to the clipboard if possible.",
         )
+
         parser.add_argument(
             "-i",
             "--interactive",
-            default=False,
             action="store_true",
             help="Provides the REPL interface to play with prompts. The program behaves like the Python interpreter.",
         )
+
         parser.add_argument(
             "--ps2",
             default="... ",
-            type=str,
             help="The custom string that is used to wait for the next user input of the prompts.",
         )
-
-    @classmethod
-    def _append_subparser(cls, parser: SaniproArgumentParser) -> None:
-        cls._do_append_subparser(parser)
-
-    @classmethod
-    def _do_append_subparser(cls, parser: SaniproArgumentParser) -> None:
-        """User-defined parser implementation."""
 
     @classmethod
     def _do_get_parser(cls) -> dict:
@@ -475,7 +466,6 @@ class CliArgsNamespaceDemo:
         # parse global_options
         parser = cls._get_parser()
         cls._append_parser(parser)
-        cls._append_subparser(parser)
         args, args_val = parser.parse_known_args(arg_val, namespace=cls())
         return args, args_val
 
@@ -547,14 +537,11 @@ class RunnerFilterDeclarative(ExecuteSingle, RunnerDeclarative, RunnerFilter):
         return str(self._pipeline)
 
 
-from sanipro.converter_context import get_config
-
-
 class CliCommandsDemo(CliCommands):
     def __init__(self, args: CliArgsNamespaceDemo, args_ret: list[str]) -> None:
         self._args = args
         self._args_ret = args_ret
-        self._config = get_config(self._args.config)
+        self._config = self._args.config
         self.input_type = self._config.get_input_token_class(self._args.input_type)
         self.output_type = self._config.get_output_token_class(self._args.output_type)
 
@@ -566,9 +553,9 @@ class CliCommandsDemo(CliCommands):
         ps2 = self._args.ps2
 
         return (
-            inputs.OnelineInputStrategy(ps1)
+            inputs.OnelineInputStrategy(ps1, self._args.color)
             if self._args.one_line
-            else inputs.MultipleInputStrategy(ps1, ps2)
+            else inputs.MultipleInputStrategy(ps1, ps2, self._args.color)
         )
 
     def _initialize_formatter(self, token_map: "TokenMap") -> Callable:
@@ -702,8 +689,27 @@ class CliCommandsDemo(CliCommands):
         return self._get_runner()
 
 
+def colorize(text: str, use_color: bool) -> typing.Any:
+    if use_color:
+        return style(text)
+
+    def _inner(t: str) -> str:
+        return t
+
+    return _inner(text)
+
+
 def app():
     args, args_ret = CliArgsNamespaceDemo.from_sys_argv(sys.argv[1:])
+
+    logging.basicConfig(
+        format=colorize(
+            ("[%(levelname)s] %(module)s/%(funcName)s (%(lineno)d):") + " %(message)s",
+            args.color,
+        ),
+        datefmt=r"%Y-%m-%d %H:%M:%S",
+    )
+
     cli_commands = CliCommandsDemo(args, args_ret)
 
     log_level = cli_commands.get_logger_level()

@@ -59,13 +59,6 @@ from saniprocli.help_formatter import SaniproHelpFormatter
 from saniprocli.sanipro_argparse import SaniproArgumentParser
 from saniprocli.textutils import ClipboardHandler
 
-logging.basicConfig(
-    format=style(
-        ("[%(levelname)s] %(module)s/%(funcName)s (%(lineno)d):") + " %(message)s"
-    ),
-    datefmt=r"%Y-%m-%d %H:%M:%S",
-)
-
 
 class CmdModuleTuple(NamedTuple):
     key: str
@@ -240,12 +233,11 @@ class CliMaskCommand(CliCommand):
             ),
         )
 
-        subcommand.add_argument("mask", nargs="*", type=str, help="Masks this word.")
+        subcommand.add_argument("mask", nargs="*", help="Masks this word.")
 
         subcommand.add_argument(
             "-t",
             "--replace-to",
-            type=str,
             default=r"%%%",
             help="The new character or string replaced to.",
         )
@@ -496,6 +488,7 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
     roundup = 2
     replace_to: str
     mask: Sequence[str]
+    color: bool
 
     # 'dest' name for general operations
     operation_id = str  # may be 'filter' and more
@@ -521,11 +514,13 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
 
     @classmethod
     def _do_append_parser(cls, parser: SaniproArgumentParser) -> None:
+        parser.add_argument(
+            "--color", action="store_true", help="Uses color for displaying."
+        )
 
         parser.add_argument(
             "-d",
             "--input-type",
-            type=str,
             choices=SupportedInTokenType.choises(),
             default="a1111compat",
             help=("Preferred token type for the original prompts."),
@@ -534,7 +529,6 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
         parser.add_argument(
             "-s",
             "--output-type",
-            type=str,
             choices=SupportedOutTokenType.choises(),
             default="a1111compat",
             help=("Preferred token type for the processed prompts."),
@@ -554,7 +548,6 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
         parser.add_argument(
             "-x",
             "--exclude",
-            type=str,
             nargs="*",
             help=(
                 "Exclude this token from the original prompt. "
@@ -565,7 +558,6 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
         parser.add_argument(
             "-c",
             "--config",
-            type=str,
             default=None,
             help=("Specifies a config file for each token type."),
         )
@@ -666,9 +658,9 @@ class CliCommandsDemo(CliCommands):
         ps2 = self._args.ps2
 
         return (
-            inputs.OnelineInputStrategy(ps1)
+            inputs.OnelineInputStrategy(ps1, self._args.color)
             if self._args.one_line
-            else inputs.MultipleInputStrategy(ps1, ps2)
+            else inputs.MultipleInputStrategy(ps1, ps2, self._args.color)
         )
 
     def _initialize_formatter(self, token_map: "TokenMap") -> Callable:
@@ -774,8 +766,27 @@ class CliCommandsDemo(CliCommands):
         return command_map
 
 
+def colorize(text: str, use_color: bool) -> typing.Any:
+    if use_color:
+        return style(text)
+
+    def _inner(t: str) -> str:
+        return t
+
+    return _inner(text)
+
+
 def app():
     args = CliArgsNamespaceDemo.from_sys_argv(sys.argv[1:])
+
+    logging.basicConfig(
+        format=colorize(
+            ("[%(levelname)s] %(module)s/%(funcName)s (%(lineno)d):") + " %(message)s",
+            args.color,
+        ),
+        datefmt=r"%Y-%m-%d %H:%M:%S",
+    )
+
     cli_commands = CliCommandsDemo(args)
 
     log_level = cli_commands.get_logger_level()

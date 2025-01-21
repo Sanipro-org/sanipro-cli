@@ -147,22 +147,31 @@ class ExecuteMultiple(ConsoleWriter, IExecuteMultiple, ABC):
             raise
         return _InputState.FIRST_INPUT
 
+    def _do_handle_second_input(self) -> None:
+        pass
+
     def _handle_second_input(self) -> _InputState:
-        self.color.color_foreground = "green"
+        self._do_handle_second_input()
         try:
             self._ctx.second = self._handle_input()
             if self._ctx.second:
                 return _InputState.EXECUTE
         except EOFError:
-            self.color.color_foreground = self._ctx.original_color
+            self._on_eof()
             return _InputState.FIRST_INPUT
         return _InputState.SECOND_INPUT
+
+    def _on_eof(self) -> None:
+        pass
 
     def _handle_execution(self) -> None:
         out = self._execute_multi(self._ctx.first, self._ctx.second)
         if out:
             self._write(f"{out}\n")
-        self.color.color_foreground = self._ctx.original_color
+        self._do_handle_execution()
+
+    def _do_handle_execution(self) -> None:
+        pass
 
     def _process_state(self) -> bool:
 
@@ -178,6 +187,30 @@ class ExecuteMultiple(ConsoleWriter, IExecuteMultiple, ABC):
             self._handle_execution()
             return False
         return True
+
+    def _start_loop(self) -> None:
+        while True:
+            try:
+                self._ctx = _InputContext()
+                while self._process_state():
+                    continue
+            except EOFError:
+                break
+
+
+class ExecuteMultipleNocolor(ExecuteMultiple):
+    pass
+
+
+class ExecuteMultipleColor(ExecuteMultiple):
+    def _do_handle_second_input(self) -> None:
+        self.color.color_foreground = "green"
+
+    def _on_eof(self) -> None:
+        self.color.color_foreground = self._ctx.original_color
+
+    def _do_handle_execution(self) -> None:
+        self.color.color_foreground = self._ctx.original_color
 
     def _start_loop(self) -> None:
         from saniprocli import color

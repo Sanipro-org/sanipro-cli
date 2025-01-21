@@ -1,4 +1,5 @@
 import sys
+from collections.abc import Callable
 
 from saniprocli.abc import InputStrategy
 from saniprocli.console import ConsoleWriter
@@ -36,25 +37,40 @@ class DirectInputStrategy(InputStrategy):
                 exit(1)
 
 
+def _no_style(text: str) -> str:
+    """Just returns input text."""
+
+    return text
+
+
+def get_stylize_callback(use_color: bool) -> Callable:
+    """Get style function for readline by the configuration."""
+
+    if use_color:
+        from saniprocli.color import style_for_readline
+
+        return style_for_readline
+    return _no_style
+
+
 class OnelineInputStrategy(InputStrategy, ConsoleWriter):
     """Represents the method to get a user input per prompt
     in interactive mode.
     It consumes just one line to get the input by a user."""
 
-    def __init__(self, ps1: str = "") -> None:
+    def __init__(self, ps1: str = "", use_color: bool = False) -> None:
         super().__init__()
         self.ps1 = ps1
+        self.try_stylize = get_stylize_callback(use_color)
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(ps1={self.ps1})"
 
     def input(self) -> str:
-        from saniprocli.color import style_for_readline
-
         prompt = self.ps1
 
         try:
-            return input_last_break(style_for_readline(prompt))
+            return input_last_break(self.try_stylize(prompt))
         except KeyboardInterrupt:
             self._ewrite("\nKeyboardInterrupt\n")
             return ""
@@ -67,9 +83,10 @@ class MultipleInputStrategy(InputStrategy, ConsoleWriter):
     It consumes multiple lines and reduce them to a string,
     and users must confirm their input by sending EOF (^D)."""
 
-    def __init__(self, ps1: str = "", ps2: str = "") -> None:
+    def __init__(self, ps1: str = "", ps2: str = "", use_color: bool = False) -> None:
         super().__init__()
         self.ps1 = ps1
+        self.try_stylize = get_stylize_callback(use_color)
 
         if ps1 != "" and ps2 == "":
             # try to have the same value with ps1
@@ -81,15 +98,13 @@ class MultipleInputStrategy(InputStrategy, ConsoleWriter):
         return f"{type(self).__name__}(ps1={self.ps1}, ps2={self.ps2})"
 
     def input(self) -> str:
-        from saniprocli.color import style_for_readline
-
         buffer = []
         _current_prompt = self.ps1
         _initial_prompt = _current_prompt
 
         while True:
             try:
-                line = input_last_break(style_for_readline(_current_prompt))
+                line = input_last_break(self.try_stylize(_current_prompt))
                 buffer.append(line)
                 _current_prompt = self.ps2
             except KeyboardInterrupt:
