@@ -7,11 +7,18 @@ from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
 from sanipro.abc import IPipelineResult, IPromptPipeline
-from sanipro.token_types import SupportedInTokenType, SupportedOutTokenType
 
 if TYPE_CHECKING:
     from sanipro.converter_context import TokenMap
 
+from sanipro.converter_context import (
+    A1111Config,
+    Config,
+    CSVConfig,
+    InputConfig,
+    OutputConfig,
+    config_from_file,
+)
 from sanipro.delimiter import Delimiter
 from sanipro.diff import PromptDifferenceDetector
 from sanipro.filter_exec import FilterExecutor
@@ -58,7 +65,7 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
             "-d",
             "--input-type",
             type=str,
-            choices=SupportedInTokenType.choises(),
+            choices=("a1111compat", "csv"),
             default="a1111compat",
             help=("Preferred token type for the original prompts."),
         )
@@ -67,7 +74,7 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
             "-s",
             "--output-type",
             type=str,
-            choices=SupportedOutTokenType.choises(),
+            choices=("a1111", "a1111compat", "csv"),
             default="a1111compat",
             help=("Preferred token type for the processed prompts."),
         )
@@ -200,9 +207,22 @@ class RunnerFilterDeclarative(ExecuteSingle, RunnerDeclarative, RunnerFilter):
         return str(self._pipeline)
 
 
+def get_config(path: str | None = None) -> Config:
+    """Get a config from filepath. The default config is returned
+    if None is specified."""
+
+    if path is None:
+        return Config(
+            A1111Config(InputConfig(","), OutputConfig(", ")),
+            A1111Config(InputConfig(","), OutputConfig(", ")),
+            CSVConfig(InputConfig("\n", "\t"), OutputConfig("\n", "\t")),
+        )
+
+    return config_from_file(path)
+
+
 class CliCommandsDemo(CliCommands):
     def __init__(self, args: CliArgsNamespaceDemo) -> None:
-        from sanipro.converter_context import get_config
 
         self._args = args
         self._config = get_config(self._args.config)

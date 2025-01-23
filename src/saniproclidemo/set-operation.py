@@ -10,11 +10,18 @@ from typing import TYPE_CHECKING
 
 from sanipro.abc import IPipelineResult, IPromptPipeline, MutablePrompt
 from sanipro.compatible import Self
-from sanipro.token_types import SupportedInTokenType, SupportedOutTokenType
 
 if TYPE_CHECKING:
     from sanipro.converter_context import TokenMap
 
+from sanipro.converter_context import (
+    A1111Config,
+    Config,
+    CSVConfig,
+    InputConfig,
+    OutputConfig,
+    config_from_file,
+)
 from sanipro.delimiter import Delimiter
 from sanipro.diff import PromptDifferenceDetector
 from sanipro.filter_exec import FilterExecutor
@@ -28,6 +35,8 @@ from saniprocli import cli_hooks, inputs
 from saniprocli.abc import CliRunnable, InputStrategy, RunnerFilter, RunnerSetOperation
 from saniprocli.cli_runner import (
     ExecuteMultiple,
+    ExecuteMultipleColor,
+    ExecuteMultipleNocolor,
     ExecuteSingle,
     RunnerDeclarative,
     RunnerInteractive,
@@ -129,6 +138,7 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
     roundup = 2
     replace_to: str
     mask: Sequence[str]
+    color: bool
 
     # 'dest' name for general operations
     operation_id = str  # may be 'filter', 'set_op', and more
@@ -148,8 +158,7 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
         parser.add_argument(
             "-d",
             "--input-type",
-            type=str,
-            choices=SupportedInTokenType.choises(),
+            choices=("a1111compat", "csv"),
             default="a1111compat",
             help=("Preferred token type for the original prompts."),
         )
@@ -157,8 +166,7 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
         parser.add_argument(
             "-s",
             "--output-type",
-            type=str,
-            choices=SupportedOutTokenType.choises(),
+            choices=("a1111", "a1111compat", "csv"),
             default="a1111compat",
             help=("Preferred token type for the processed prompts."),
         )
@@ -175,9 +183,12 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
         )
 
         parser.add_argument(
+            "--color", action="store_true", help="Uses color for displaying."
+        )
+
+        parser.add_argument(
             "-x",
             "--exclude",
-            type=str,
             nargs="*",
             help=(
                 "Exclude this token from the original prompt. "
@@ -188,7 +199,6 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
         parser.add_argument(
             "-c",
             "--config",
-            type=str,
             default=None,
             help=("Specifies a config file for each token type."),
         )
@@ -272,46 +282,55 @@ class RunnerFilterDeclarative(ExecuteSingle, RunnerDeclarative, RunnerFilter):
         return str(self._pipeline)
 
 
-class RunnerSetOperationInteractiveDual(
-    ExecuteMultiple, RunnerInteractive, RunnerSetOperation
-):
-    def __init__(
-        self,
-        pipeline: IPromptPipeline,
-        strategy: InputStrategy,
-        calculator: SetCalculatorWrapper,
-        detector: type[PromptDifferenceDetector],
-        use_clipboard: bool,
-    ) -> None:
-        super().__init__(pipeline, strategy, calculator)
+def RunnerSetOperationInteractiveDual(use_color: bool, *args, **kwargs):
+    ColorMixin: type[ExecuteMultiple] = (
+        ExecuteMultipleColor if use_color else ExecuteMultipleNocolor
+    )
 
-        self._tokenizer = pipeline.tokenizer
-        self._detector_cls = detector
-        self._use_clipboard = use_clipboard
+    class _RunnerSetOperationInteractiveDual(ColorMixin, RunnerInteractive, RunnerSetOperation):  # type: ignore
+        def __init__(
+            self,
+            pipeline: IPromptPipeline,
+            strategy: InputStrategy,
+            calculator: SetCalculatorWrapper,
+            detector: type[PromptDifferenceDetector],
+            use_clipboard: bool,
+        ) -> None:
+            super().__init__(pipeline, strategy, calculator)
+            self._tokenizer = pipeline.tokenizer
+            self._detector_cls = detector
+            self._use_clipboard = use_clipboard
 
-    def _execute_multi_inner(self, first: str, second: str) -> str:
-        from sanipro.pipelineresult import PipelineResult
+        def _execute_multi_inner(self, first: str, second: str) -> str:
+            from sanipro.pipelineresult import PipelineResult
 
-        prompt_first_before = self._tokenizer.tokenize_prompt(first)
-        prompt_second_before = self._tokenizer.tokenize_prompt(second)
+            prompt_first_before = self._tokenizer.tokenize_prompt(first)
+            prompt_second_before = self._tokenizer.tokenize_prompt(second)
 
-        prompt = [
-            self._tokenizer.token_cls(name=x.name, weight=x.weight)
-            for x in self._calculator.do_math(prompt_first_before, prompt_second_before)
-        ]
+            prompt = [
+                self._tokenizer.token_cls(name=x.name, weight=x.weight)
+                for x in self._calculator.do_math(
+                    prompt_first_before, prompt_second_before
+                )
+            ]
 
-        logger.info("(statistics) prompt A <> result")
-        StatisticsHandler.show_cli_stat(PipelineResult(prompt_first_before, prompt))
+            logger.info("(statistics) prompt A <> result")
+            StatisticsHandler.show_cli_stat(PipelineResult(prompt_first_before, prompt))
 
-        logger.info("(statistics) prompt B <> result")
-        StatisticsHandler.show_cli_stat(PipelineResult(prompt_second_before, prompt))
+            logger.info("(statistics) prompt B <> result")
+            StatisticsHandler.show_cli_stat(
+                PipelineResult(prompt_second_before, prompt)
+            )
 
-        selialized = str(self._pipeline.new(prompt))
+            selialized = str(self._pipeline.new(prompt))
+            logger.debug(self._pipeline.new)
 
-        if self._use_clipboard:
-            ClipboardHandler.copy_to_clipboard(selialized)
+            if self._use_clipboard:
+                ClipboardHandler.copy_to_clipboard(selialized)
 
-        return selialized
+            return selialized
+
+    return _RunnerSetOperationInteractiveDual(*args, **kwargs)
 
 
 class RunnerSetOperationDeclarativeMono(
@@ -364,9 +383,22 @@ class RunnerSetOperationDeclarativeMono(
         return selialized
 
 
+def get_config(path: str | None = None) -> Config:
+    """Get a config from filepath. The default config is returned
+    if None is specified."""
+
+    if path is None:
+        return Config(
+            A1111Config(InputConfig(","), OutputConfig(", ")),
+            A1111Config(InputConfig(","), OutputConfig(", ")),
+            CSVConfig(InputConfig("\n", "\t"), OutputConfig("\n", "\t")),
+        )
+
+    return config_from_file(path)
+
+
 class CliCommandsDemo(CliCommands):
     def __init__(self, args: CliArgsNamespaceDemo) -> None:
-        from sanipro.converter_context import get_config
 
         self._args = args
         self._config = get_config(self._args.config)
@@ -444,6 +476,7 @@ class CliCommandsDemo(CliCommands):
             calculator = SetCalculatorWrapper.create_from(self._args.set_op_id)
             if self._args.interactive:
                 return RunnerSetOperationInteractiveDual(
+                    self._args.color,
                     pipe,
                     input_strategy,
                     calculator,

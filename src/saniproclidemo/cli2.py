@@ -23,8 +23,14 @@ from typing import TYPE_CHECKING
 
 from sanipro.abc import IPipelineResult, IPromptPipeline
 from sanipro.compatible import Self
-from sanipro.converter_context import Config, config_from_file, get_config
-from sanipro.token_types import SupportedInTokenType, SupportedOutTokenType
+from sanipro.converter_context import (
+    A1111Config,
+    Config,
+    CSVConfig,
+    InputConfig,
+    OutputConfig,
+    config_from_file,
+)
 
 if TYPE_CHECKING:
     from sanipro.converter_context import TokenMap
@@ -72,7 +78,7 @@ from saniprocli.sanipro_argparse import SaniproArgumentParser
 from saniprocli.textutils import ClipboardHandler
 
 
-class SubparserInjectable(abc.ABC):
+class CliCommand(abc.ABC):
     """The trait with the ability to inject a subparser."""
 
     @classmethod
@@ -81,20 +87,7 @@ class SubparserInjectable(abc.ABC):
         """Injects subparser."""
 
 
-class CliCommand(SubparserInjectable):
-    """The wrapper class for the filter commands
-    with the addition of subparser."""
-
-    command_id: str
-
-    @classmethod
-    @abc.abstractmethod
-    def get_parser(cls) -> SaniproArgumentParser:
-        """Does nothing by default."""
-
-
 class CliExcludeCommand(CliCommand):
-    command_id: str = "exclude"
     exclude: Sequence[str]
 
     def __init__(self, excludes: Sequence[str]):
@@ -102,9 +95,7 @@ class CliExcludeCommand(CliCommand):
 
     @classmethod
     def get_parser(cls) -> SaniproArgumentParser:
-        parser = SaniproArgumentParser(
-            cls.command_id, formatter_class=SaniproHelpFormatter
-        )
+        parser = SaniproArgumentParser("exclude", formatter_class=SaniproHelpFormatter)
         parser.add_argument(
             "-x",
             "--exclude",
@@ -115,7 +106,6 @@ class CliExcludeCommand(CliCommand):
 
 
 class CliSimilarCommand(CliCommand):
-    command_id: str = "similar"
     method: ReordererStrategy
     reverse: bool
 
@@ -125,7 +115,7 @@ class CliSimilarCommand(CliCommand):
     @classmethod
     def get_parser(cls) -> SaniproArgumentParser:
         parser = SaniproArgumentParser(
-            cls.command_id,
+            "similar",
             formatter_class=SaniproHelpFormatter,
             description="Reorders tokens with their similarity.",
         )
@@ -140,21 +130,14 @@ class CliSimilarCommand(CliCommand):
         def _matcher(method: str) -> ReordererStrategy:
             """Instanciate one reorder function from the parsed result."""
 
-            def _inner() -> type[ReordererStrategy]:
-                """Matches the methods specified on the command line
-                to the names of concrete classes.
-                Searches other than what the strategy uses MST."""
-
-                if method == "naive":
-                    return NaiveReorderer
-                elif method == "greedy":
-                    return GreedyReorderer
-                elif method == "kruskal":
-                    return KruskalMSTReorderer
-                return PrimMSTReorderer
-
-            Reorderer = _inner()
-            return Reorderer(strategy=SequenceMatcherSimilarity())
+            strategy = SequenceMatcherSimilarity()
+            if method == "naive":
+                return NaiveReorderer(strategy)
+            elif method == "greedy":
+                return GreedyReorderer(strategy)
+            elif method == "kruskal":
+                return KruskalMSTReorderer(strategy)
+            return PrimMSTReorderer(strategy)
 
         parser.add_argument(
             "-m",
@@ -169,7 +152,6 @@ class CliSimilarCommand(CliCommand):
 
 
 class CliMaskCommand(CliCommand):
-    command_id: str = "mask"
     mask: Sequence[str]
     replace_to: str
 
@@ -179,7 +161,7 @@ class CliMaskCommand(CliCommand):
     @classmethod
     def get_parser(cls) -> SaniproArgumentParser:
         parser = SaniproArgumentParser(
-            cls.command_id,
+            "mask",
             description="Mask words specified with another word (optional).",
             formatter_class=SaniproHelpFormatter,
             epilog="Note that you can still use the global `--exclude` option"
@@ -196,7 +178,6 @@ class CliMaskCommand(CliCommand):
 
 
 class CliRandomCommand(CliCommand):
-    command_id: str = "random"
     seed: int
 
     def __init__(self, seed: int | None = None):
@@ -205,22 +186,17 @@ class CliRandomCommand(CliCommand):
     @classmethod
     def get_parser(cls) -> SaniproArgumentParser:
         subcommand = SaniproArgumentParser(
-            cls.command_id,
+            "random",
             formatter_class=SaniproHelpFormatter,
             description="Shuffles all the prompts altogether.",
         )
         subcommand.add_argument(
-            "-b",
-            "--seed",
-            default=None,
-            type=int,
-            help="Fixed randomness to this value.",
+            "-b", "--seed", type=int, help="Fixed randomness to this value."
         )
         return subcommand
 
 
 class CliResetCommand(CliCommand):
-    command_id: str = "reset"
     value: float
 
     def __init__(self, new_value: float | None = None) -> None:
@@ -229,7 +205,7 @@ class CliResetCommand(CliCommand):
     @classmethod
     def get_parser(cls) -> SaniproArgumentParser:
         subcommand = SaniproArgumentParser(
-            cls.command_id,
+            "reset",
             formatter_class=SaniproHelpFormatter,
             description="Initializes all the weight of the tokens.",
         )
@@ -244,7 +220,7 @@ class CliResetCommand(CliCommand):
 
 
 class CliRoundUpCommand(CliCommand):
-    command_id: str = "roundup"
+    roundup: int
 
     def __init__(self, digits: int):
         self.command = RoundUpCommand(digits)
@@ -252,7 +228,7 @@ class CliRoundUpCommand(CliCommand):
     @classmethod
     def get_parser(cls) -> SaniproArgumentParser:
         subcommand = SaniproArgumentParser(
-            cls.command_id, formatter_class=SaniproHelpFormatter
+            "roundup", formatter_class=SaniproHelpFormatter
         )
         subcommand.add_argument(
             "-u",
@@ -265,7 +241,6 @@ class CliRoundUpCommand(CliCommand):
 
 
 class CliSortCommand(CliCommand):
-    command_id: str = "sort"
     reverse: bool
 
     def __init__(self, reverse: bool = False):
@@ -274,7 +249,7 @@ class CliSortCommand(CliCommand):
     @classmethod
     def get_parser(cls) -> SaniproArgumentParser:
         subcommand = SaniproArgumentParser(
-            cls.command_id,
+            "sort",
             formatter_class=SaniproHelpFormatter,
             description="Reorders duplicate tokens.",
             epilog="This command reorders tokens with their weights by default.",
@@ -286,7 +261,6 @@ class CliSortCommand(CliCommand):
 
 
 class CliSortAllCommand(CliCommand):
-    command_id: str = "sort-all"
     reverse: bool
     method: Callable
 
@@ -306,7 +280,7 @@ class CliSortAllCommand(CliCommand):
             return sort_lexicographically
 
         parser = SaniproArgumentParser(
-            cls.command_id,
+            "sort-all",
             formatter_class=SaniproHelpFormatter,
             description="Reorders all the prompts.",
         )
@@ -326,7 +300,6 @@ class CliSortAllCommand(CliCommand):
 
 
 class CliUniqueCommand(CliCommand):
-    command_id: str = "unique"
     reverse: bool
 
     def __init__(self, reverse: bool):
@@ -335,7 +308,7 @@ class CliUniqueCommand(CliCommand):
     @classmethod
     def get_parser(cls) -> SaniproArgumentParser:
         parser = SaniproArgumentParser(
-            cls.command_id,
+            "unique",
             formatter_class=SaniproHelpFormatter,
             description="Removes duplicated tokens, and uniquify them.",
         )
@@ -359,7 +332,6 @@ class CliArgsNamespaceDemo:
     input_type: str
     output_type: str
     interactive: bool
-    roundup = 2
     clipboard: bool
     config: Config
     color: bool
@@ -371,7 +343,11 @@ class CliArgsNamespaceDemo:
         parser.add_argument(
             "-c",
             "--config",
-            default=get_config(None),
+            default=Config(
+                A1111Config(InputConfig(","), OutputConfig(", ")),
+                A1111Config(InputConfig(","), OutputConfig(", ")),
+                CSVConfig(InputConfig("\n", "\t"), OutputConfig("\n", "\t")),
+            ),
             type=config_from_file,
             help="Specifies a config file for each token type.",
         )
@@ -379,19 +355,22 @@ class CliArgsNamespaceDemo:
         parser.add_argument(
             "-d",
             "--input-type",
-            choices=SupportedInTokenType.choises(),
+            choices=("a1111compat", "csv"),
             default="a1111compat",
             help="Preferred token type for the original prompts.",
         )
 
         parser.add_argument(
-            "--color", action="store_true", help="Uses color for displaying."
+            "--no-color",
+            action="store_false",
+            default=True,
+            dest="color",
+            help="Without color for displaying.",
         )
 
         parser.add_argument(
             "-l",
             "--one-line",
-            # default=bool,
             action="store_true",
             help="Whether to confirm the prompt input with a single line of input.",
         )
@@ -406,17 +385,13 @@ class CliArgsNamespaceDemo:
         parser.add_argument(
             "-s",
             "--output-type",
-            choices=SupportedOutTokenType.choises(),
+            choices=("a1111", "a1111compat", "csv"),
             default="a1111compat",
             help="Preferred token type for the processed prompts.",
         )
 
         parser.add_argument(
-            "-v",
-            "--verbose",
-            default=0,
-            action="count",
-            help="Switch to display the extra logs for nerds, This may be useful for debugging. Adding more flags causes your terminal more messier.",
+            "-v", "--verbose", action="count", help="Switch to display the extra logs."
         )
 
         parser.add_argument(
@@ -430,7 +405,7 @@ class CliArgsNamespaceDemo:
             "-i",
             "--interactive",
             action="store_true",
-            help="Provides the REPL interface to play with prompts. The program behaves like the Python interpreter.",
+            help="Provides the REPL interface to play with prompts.",
         )
 
         parser.add_argument(
@@ -454,6 +429,7 @@ class CliArgsNamespaceDemo:
     def _get_parser(cls) -> SaniproArgumentParser:
         props = cls._do_get_parser()
         return SaniproArgumentParser(
+            add_help=True,
             prog=props["prog"],
             description=props["description"],
             formatter_class=SaniproHelpFormatter,
@@ -579,15 +555,26 @@ class CliCommandsDemo(CliCommands):
         delimiter = Delimiter(its, ots, ifs)
         return delimiter
 
-    def _initialize_pipeline(self) -> IPromptPipeline:
+    def _initialize_runner(self, pipe: IPromptPipeline) -> CliRunnable:
+        """Returns a runner."""
+        input_strategy = self._get_input_strategy()
+
+        cli_hooks.on_init.append(prepare_readline)
+        cli_hooks.execute(cli_hooks.on_init)
+
+        if self._args.interactive:
+            return RunnerFilterInteractive(
+                pipe, input_strategy, PromptDifferenceDetector, self._args.clipboard
+            )
+        return RunnerFilterDeclarative(pipe, input_strategy)
+
+    def _get_pipeline(self) -> IPromptPipeline:
         from sanipro.pipeline_v1 import PromptPipelineV1
 
-        global_args = self._args
         args_val = self._args_ret
 
         # parse filter_spec
         filterpipe = FilterExecutor()
-        filterpipe.append_command(RoundUpCommand(global_args.roundup))
 
         command_map: dict[str, type[CliCommand]] = {
             "mask": CliMaskCommand,
@@ -606,21 +593,69 @@ class CliCommandsDemo(CliCommands):
         name_parser = SaniproArgumentParser(add_help=False)
         name_parser.add_argument("name", choices=command_map.keys())
 
-        while args_val:
-            arg_name, args_after_name = name_parser.parse_known_args(
-                args_val, FilterId()
-            )
-            filter_id = arg_name.name
-            command_cls = command_map[filter_id]
-            curr_parser = command_cls.get_parser()
+        def _split_help(args_ret: list[str]):
+            help = []
+            new_args = []
 
-            parsed_so_far, args_val = curr_parser.parse_known_args(
-                args_after_name, command_cls
-            )
+            for item in args_ret:
+                if item in ("--help", "-h"):
+                    help.append(item)
+                    continue
+                new_args.append(item)
+            return new_args, help
+
+        args_val, help_stack = _split_help(args_val)
+
+        while args_val:
+            name_parsed_success = False
+            args_after_name = None
+            curr_parser = None
+            command_cls = None
+
+            while not name_parsed_success:
+                arg_name, args_after_name = name_parser.parse_known_args(
+                    args_val, FilterId()
+                )
+                filter_id = arg_name.name
+                command_cls = command_map[filter_id]
+                curr_parser = command_cls.get_parser()
+
+                if (
+                    not args_after_name
+                    and (  # entire cli arguments were so far consumed
+                        help_stack  # -h/--help was specified
+                    )
+                ):
+                    # regard "--help" was specified at the end of the cli argument
+                    args_val.append(help_stack.pop())
+                    continue
+                # accepted
+                name_parsed_success = True
+
+            if curr_parser is None or args_after_name is None or curr_parser is None:
+                raise Exception("failed to parse an argument")
+
+            arg_parsed_success = False
+            parsed_so_far = None
+
+            while not arg_parsed_success:
+                parsed_so_far, args_val = curr_parser.parse_known_args(
+                    args_after_name, command_cls
+                )
+                if not args_val and (  # entire cli arguments were so far consumed
+                    help_stack  # -h/--help was specified
+                ):
+                    # regard "--help" was specified at the end of the cli argument
+                    args_after_name.append(help_stack.pop())
+                    continue
+                # accepted
+                arg_parsed_success = True
 
             inst = None
             if parsed_so_far is CliMaskCommand:
                 inst = MaskCommand(parsed_so_far.mask, parsed_so_far.replace_to)
+            elif parsed_so_far is RoundUpCommand:
+                inst = RoundUpCommand(parsed_so_far.roundup)
             elif parsed_so_far is CliRandomCommand:
                 inst = RandomCommand(parsed_so_far.seed)
             elif parsed_so_far is CliResetCommand:
@@ -655,30 +690,8 @@ class CliCommandsDemo(CliCommands):
         token_type = self.output_type.token_type
         tokenizer = self.input_type.tokenizer(parser, token_type)
 
-        return PromptPipelineV1(tokenizer, filterpipe, formatter)
-
-    def _initialize_runner(self, pipe: IPromptPipeline) -> CliRunnable:
-        """Returns a runner."""
-        input_strategy = self._get_input_strategy()
-
-        cli_hooks.on_init.append(prepare_readline)
-        cli_hooks.execute(cli_hooks.on_init)
-
-        if self._args.interactive:
-            return RunnerFilterInteractive(
-                pipe, input_strategy, PromptDifferenceDetector, self._args.clipboard
-            )
-        return RunnerFilterDeclarative(pipe, input_strategy)
-
-    def _get_pipeline(self) -> IPromptPipeline:
-        """This is a pipeline for the purpose of showcasing.
-        Since all the parameters of each command is variable, the command
-        sacrifices the composability.
-        It is good for you to create your own pipeline, and name it
-        so you can use it as a preset."""
-
-        pipeline_cls = self._initialize_pipeline()
-        return pipeline_cls
+        pipeline = PromptPipelineV1(tokenizer, filterpipe, formatter)
+        return pipeline
 
     def _get_runner(self) -> CliRunnable:
         pipe = self._get_pipeline()
