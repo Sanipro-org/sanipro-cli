@@ -12,6 +12,7 @@ filter_name      := "mask"
                   | "unique"
 """
 
+import abc
 import atexit
 import logging
 import os
@@ -31,13 +32,6 @@ from sanipro.converter_context import (
     OutputConfig,
     config_from_file,
 )
-
-if TYPE_CHECKING:
-    from sanipro.converter_context import TokenMap
-
-import abc
-from collections.abc import Callable
-
 from sanipro.delimiter import Delimiter
 from sanipro.diff import PromptDifferenceDetector
 from sanipro.filter_exec import FilterExecutor
@@ -77,6 +71,9 @@ from saniprocli.help_formatter import SaniproHelpFormatter
 from saniprocli.sanipro_argparse import SaniproArgumentParser
 from saniprocli.textutils import ClipboardHandler
 
+if TYPE_CHECKING:
+    from sanipro.converter_context import TokenMap
+
 
 class CliCommand(abc.ABC):
     """The trait with the ability to inject a subparser."""
@@ -89,9 +86,6 @@ class CliCommand(abc.ABC):
 
 class CliExcludeCommand(CliCommand):
     exclude: Sequence[str]
-
-    def __init__(self, excludes: Sequence[str]):
-        self.command = ExcludeCommand(excludes)
 
     @classmethod
     def get_parser(cls) -> SaniproArgumentParser:
@@ -108,9 +102,6 @@ class CliExcludeCommand(CliCommand):
 class CliSimilarCommand(CliCommand):
     method: ReordererStrategy
     reverse: bool
-
-    def __init__(self, reorderer: ReordererStrategy, *, reverse=False):
-        self.command = SimilarCommand(reorderer, reverse=reverse)
 
     @classmethod
     def get_parser(cls) -> SaniproArgumentParser:
@@ -155,9 +146,6 @@ class CliMaskCommand(CliCommand):
     mask: Sequence[str]
     replace_to: str
 
-    def __init__(self, excludes: Sequence[str], replace_to: str):
-        self.command = MaskCommand(excludes, replace_to)
-
     @classmethod
     def get_parser(cls) -> SaniproArgumentParser:
         parser = SaniproArgumentParser(
@@ -180,9 +168,6 @@ class CliMaskCommand(CliCommand):
 class CliRandomCommand(CliCommand):
     seed: int
 
-    def __init__(self, seed: int | None = None):
-        self.command = RandomCommand(seed)
-
     @classmethod
     def get_parser(cls) -> SaniproArgumentParser:
         subcommand = SaniproArgumentParser(
@@ -198,9 +183,6 @@ class CliRandomCommand(CliCommand):
 
 class CliResetCommand(CliCommand):
     value: float
-
-    def __init__(self, new_value: float | None = None) -> None:
-        self.command = ResetCommand(new_value)
 
     @classmethod
     def get_parser(cls) -> SaniproArgumentParser:
@@ -222,9 +204,6 @@ class CliResetCommand(CliCommand):
 class CliRoundUpCommand(CliCommand):
     roundup: int
 
-    def __init__(self, digits: int):
-        self.command = RoundUpCommand(digits)
-
     @classmethod
     def get_parser(cls) -> SaniproArgumentParser:
         subcommand = SaniproArgumentParser(
@@ -243,9 +222,6 @@ class CliRoundUpCommand(CliCommand):
 class CliSortCommand(CliCommand):
     reverse: bool
 
-    def __init__(self, reverse: bool = False):
-        self.command = SortCommand(reverse)
-
     @classmethod
     def get_parser(cls) -> SaniproArgumentParser:
         subcommand = SaniproArgumentParser(
@@ -263,9 +239,6 @@ class CliSortCommand(CliCommand):
 class CliSortAllCommand(CliCommand):
     reverse: bool
     method: Callable
-
-    def __init__(self, key: Callable, reverse: bool = False):
-        self.command = SortAllCommand(key, reverse)
 
     @classmethod
     def get_parser(cls) -> SaniproArgumentParser:
@@ -301,9 +274,6 @@ class CliSortAllCommand(CliCommand):
 
 class CliUniqueCommand(CliCommand):
     reverse: bool
-
-    def __init__(self, reverse: bool):
-        self.command = UniqueCommand(reverse)
 
     @classmethod
     def get_parser(cls) -> SaniproArgumentParser:
