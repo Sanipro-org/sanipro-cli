@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 from sanipro.abc import IPromptPipeline
-from sanipro.promptset import SetCalculatorWrapper
+from sanipro.promptset import SetCalculator
 
 from saniprocli.sanipro_argparse import SaniproArgumentParser
 
@@ -61,7 +61,7 @@ class RunnerSetOperation(ABC):
         self,
         pipeline: IPromptPipeline,
         strategy: InputStrategy,
-        calculator: SetCalculatorWrapper,
+        calculator: SetCalculator,
     ) -> None:
         """Common constructor for handling two inputs.
         The `calculator` instance operates set calculation."""
