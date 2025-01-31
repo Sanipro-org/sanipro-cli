@@ -115,10 +115,10 @@ class ExecuteMultiple(ConsoleWriter, IExecuteMultiple, ABC):
     """Represents the runner with the interactive user interface
     that expects two different prompts."""
 
-    from sanipro.promptset import SetCalculatorWrapper
+    from sanipro.promptset import SetCalculator
 
     _input_strategy: InputStrategy
-    _calculator: SetCalculatorWrapper
+    _calculator: SetCalculator
 
     @abstractmethod
     def _execute_multi_inner(self, first: str, second: str) -> str:
