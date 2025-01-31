@@ -10,10 +10,6 @@ from typing import TYPE_CHECKING
 
 from sanipro.abc import IPipelineResult, IPromptPipeline, MutablePrompt
 from sanipro.compatible import Self
-
-if TYPE_CHECKING:
-    from sanipro.converter_context import TokenMap
-
 from sanipro.converter_context import (
     A1111Config,
     Config,
@@ -29,10 +25,16 @@ from sanipro.filters.exclude import ExcludeCommand
 from sanipro.filters.roundup import RoundUpCommand
 from sanipro.filters.translate import TranslateTokenTypeCommand
 from sanipro.logger import logger, logger_root
-from sanipro.promptset import SetCalculatorWrapper
+from sanipro.promptset import (
+    DifferenceCalculator,
+    IntersectionCalculator,
+    SetCalculator,
+    SymmetricDifferenceCalculator,
+    UnionCalculator,
+)
 
 from saniprocli import cli_hooks, inputs
-from saniprocli.abc import CliRunnable, InputStrategy, RunnerFilter, RunnerSetOperation
+from saniprocli.abc import CliRunnable, InputStrategy, RunnerSetOperation
 from saniprocli.cli_runner import (
     ExecuteMultiple,
     ExecuteMultipleColor,
@@ -51,6 +53,9 @@ from saniprocli.help_formatter import SaniproHelpFormatter
 from saniprocli.sanipro_argparse import SaniproArgumentParser
 from saniprocli.textutils import ClipboardHandler
 
+if TYPE_CHECKING:
+    from sanipro.converter_context import TokenMap
+
 logging.basicConfig(
     format=style(
         ("[%(levelname)s] %(module)s/%(funcName)s (%(lineno)d):") + " %(message)s"
@@ -59,71 +64,43 @@ logging.basicConfig(
 )
 
 
-class CliSubcommandSetOperation(SubparserInjectable):
-    command_id: str = "set-operation"
+class CliSubcommandUnion(SubparserInjectable):
+    command_id: str = "union"
 
     @classmethod
     def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
         parser = subparser.add_parser(
-            name=cls.command_id,
-            formatter_class=SaniproHelpFormatter,
-            description=("Applies a set operation to the two prompts."),
-            help=("Applies a set operation to the two prompts."),
+            name=cls.command_id, formatter_class=SaniproHelpFormatter
         )
 
-        parser.add_argument(
-            "-a",
-            "--fixed-prompt",
-            type=argparse.FileType("r"),
-            help=("Feed the elements of set a from a file or stdin."),
+
+class CliSubcommandIntersection(SubparserInjectable):
+    command_id: str = "inter"
+
+    @classmethod
+    def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
+        parser = subparser.add_parser(
+            name=cls.command_id, formatter_class=SaniproHelpFormatter
         )
 
-        parser.add_argument(
-            "-i",
-            "--interactive",
-            default=False,
-            action="store_true",
-            help=(
-                "Provides the REPL interface to play with prompts. "
-                "The program behaves like the Python interpreter."
-            ),
+
+class CliSubcommandSetDifference(SubparserInjectable):
+    command_id: str = "diff"
+
+    @classmethod
+    def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
+        parser = subparser.add_parser(
+            name=cls.command_id, formatter_class=SaniproHelpFormatter
         )
 
-        parser.add_argument(
-            "-c",
-            "--clipboard",
-            default=False,
-            action="store_true",
-            help="Copy the result to the clipboard if possible.",
-        )
 
-        subparser = parser.add_subparsers(
-            title=cls.command_id,
-            description="Applies a set operation to the two prompts.",
-            help="List of available set operations to the two prompts.",
-            dest="set_op_id",
-            metavar="SET_OPERATION",
-            required=True,
-        )
+class CliSubcommandSymmetricDifference(SubparserInjectable):
+    command_id: str = "symdiff"
 
-        subparser.add_parser(
-            SetCalculatorWrapper.union,
-            help=("Combines all tokens of two prompts into one."),
-        )
-
-        subparser.add_parser(
-            SetCalculatorWrapper.intersection,
-            help=("Extracts only the tokens that are common to two prompts."),
-        )
-
-        subparser.add_parser(
-            SetCalculatorWrapper.difference,
-            help=("Excludes the tokens of the second prompt from the first one."),
-        )
-
-        subparser.add_parser(
-            SetCalculatorWrapper.symmetric_difference,
-            help=("Collects only tokens that are in only one of the two prompts."),
+    @classmethod
+    def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
+        parser = subparser.add_parser(
+            name=cls.command_id, formatter_class=SaniproHelpFormatter
         )
 
 
@@ -141,17 +118,14 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
     color: bool
 
     # 'dest' name for general operations
-    operation_id = str  # may be 'filter', 'set_op', and more
-
-    # list of 'dest' name for subcommands
-    set_op_id: str | None = None  # may be 'union', 'xor', and more
+    operation_id: str
 
     clipboard: bool
     fixed_prompt: typing.TextIO
-    config: str
+    config: Config
+    color: bool
 
-    def is_set_operation(self) -> bool:
-        return self.operation_id == CliSubcommandSetOperation.command_id
+    reverse: bool
 
     @classmethod
     def _do_append_parser(cls, parser: SaniproArgumentParser) -> None:
@@ -160,7 +134,7 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
             "--input-type",
             choices=("a1111compat", "csv"),
             default="a1111compat",
-            help=("Preferred token type for the original prompts."),
+            help="Preferred token type for the original prompts.",
         )
 
         parser.add_argument(
@@ -168,7 +142,7 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
             "--output-type",
             choices=("a1111", "a1111compat", "csv"),
             default="a1111compat",
-            help=("Preferred token type for the processed prompts."),
+            help="Preferred token type for the processed prompts.",
         )
 
         parser.add_argument(
@@ -199,17 +173,61 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
         parser.add_argument(
             "-c",
             "--config",
-            default=None,
-            help=("Specifies a config file for each token type."),
+            default=Config(
+                A1111Config(InputConfig(","), OutputConfig(", ")),
+                A1111Config(InputConfig(","), OutputConfig(", ")),
+                CSVConfig(InputConfig("\n", "\t"), OutputConfig("\n", "\t")),
+            ),
+            type=config_from_file,
+            help="Specifies a config file for each token type.",
+        )
+
+        parser.add_argument(
+            "--no-color",
+            action="store_false",
+            default=True,
+            dest="color",
+            help="Without color for displaying.",
+        )
+
+        parser.add_argument(
+            "-a",
+            "--fixed-prompt",
+            type=argparse.FileType("r"),
+            help="Feed the elements of set a from a file or stdin.",
+        )
+
+        parser.add_argument(
+            "-i",
+            "--interactive",
+            action="store_true",
+            help=(
+                "Provides the REPL interface to play with prompts. "
+                "The program behaves like the Python interpreter."
+            ),
+        )
+
+        parser.add_argument(
+            "-y",
+            "--clipboard",
+            action="store_true",
+            help="Copy the result to the clipboard if possible.",
+        )
+
+        parser.add_argument(
+            "-r", "--reverse", action="store_true", help="reverse two sets"
         )
 
     @classmethod
     def _do_append_subparser(cls, parser: SaniproArgumentParser) -> None:
-        subparser = parser.add_subparsers(
-            title="operations", dest="operation_id", required=True
-        )
+        subparser = parser.add_subparsers(title="operations", dest="operation_id")
 
-        classes: list[type[SubparserInjectable]] = [CliSubcommandSetOperation]
+        classes: list[type[SubparserInjectable]] = [
+            CliSubcommandUnion,
+            CliSubcommandIntersection,
+            CliSubcommandSetDifference,
+            CliSubcommandSymmetricDifference,
+        ]
 
         for cmd in classes:
             cmd.inject_subparser(subparser)
@@ -242,46 +260,6 @@ class StatisticsHandler:
             logger.info("(statistics) %s", line)
 
 
-class RunnerFilterInteractive(ExecuteSingle, RunnerInteractive, RunnerFilter):
-    """Represents the runner specialized for the filtering mode."""
-
-    def __init__(
-        self,
-        pipeline: IPromptPipeline,
-        strategy: InputStrategy,
-        detector: type[PromptDifferenceDetector],
-        use_clipboard: bool,
-    ) -> None:
-        super().__init__(pipeline, strategy)
-        self._token_cls = pipeline.tokenizer.token_cls
-
-        self._detector_cls = detector
-        self._use_clipboard = use_clipboard
-
-    def _execute_single_inner(self, source: str) -> str:
-        result = self._pipeline.execute(source)
-        StatisticsHandler.show_cli_stat(result)
-
-        selialized = str(self._pipeline)
-
-        if self._use_clipboard:
-            ClipboardHandler.copy_to_clipboard(selialized)
-
-        return selialized
-
-
-class RunnerFilterDeclarative(ExecuteSingle, RunnerDeclarative, RunnerFilter):
-    """Represents the runner specialized for the filtering mode."""
-
-    def __init__(self, pipeline: IPromptPipeline, strategy: InputStrategy) -> None:
-        super().__init__(pipeline, strategy)
-        self._token_cls = pipeline.tokenizer.token_cls
-
-    def _execute_single_inner(self, source: str) -> str:
-        self._pipeline.execute(source)
-        return str(self._pipeline)
-
-
 def RunnerSetOperationInteractiveDual(use_color: bool, *args, **kwargs):
     ColorMixin: type[ExecuteMultiple] = (
         ExecuteMultipleColor if use_color else ExecuteMultipleNocolor
@@ -292,7 +270,7 @@ def RunnerSetOperationInteractiveDual(use_color: bool, *args, **kwargs):
             self,
             pipeline: IPromptPipeline,
             strategy: InputStrategy,
-            calculator: SetCalculatorWrapper,
+            calculator: SetCalculator,
             detector: type[PromptDifferenceDetector],
             use_clipboard: bool,
         ) -> None:
@@ -340,7 +318,7 @@ class RunnerSetOperationDeclarativeMono(
         self,
         pipeline: IPromptPipeline,
         strategy: InputStrategy,
-        calculator: SetCalculatorWrapper,
+        calculator: SetCalculator,
         detector: type[PromptDifferenceDetector],
         fixed_prompt: MutablePrompt,
         use_clipboard: bool,
@@ -357,7 +335,7 @@ class RunnerSetOperationDeclarativeMono(
         cls,
         pipeline: IPromptPipeline,
         strategy: InputStrategy,
-        calculator: SetCalculatorWrapper,
+        calculator: SetCalculator,
         detector: type[PromptDifferenceDetector],
         text: typing.TextIO,
         use_clipboard: bool,
@@ -383,25 +361,11 @@ class RunnerSetOperationDeclarativeMono(
         return selialized
 
 
-def get_config(path: str | None = None) -> Config:
-    """Get a config from filepath. The default config is returned
-    if None is specified."""
-
-    if path is None:
-        return Config(
-            A1111Config(InputConfig(","), OutputConfig(", ")),
-            A1111Config(InputConfig(","), OutputConfig(", ")),
-            CSVConfig(InputConfig("\n", "\t"), OutputConfig("\n", "\t")),
-        )
-
-    return config_from_file(path)
-
-
 class CliCommandsDemo(CliCommands):
     def __init__(self, args: CliArgsNamespaceDemo) -> None:
 
         self._args = args
-        self._config = get_config(self._args.config)
+        self._config = self._args.config
         self.input_type = self._config.get_input_token_class(self._args.input_type)
         self.output_type = self._config.get_output_token_class(self._args.output_type)
 
@@ -413,9 +377,9 @@ class CliCommandsDemo(CliCommands):
         ps2 = self._args.ps2
 
         return (
-            inputs.OnelineInputStrategy(ps1)
+            inputs.OnelineInputStrategy(ps1, self._args.color)
             if self._args.one_line
-            else inputs.MultipleInputStrategy(ps1, ps2)
+            else inputs.MultipleInputStrategy(ps1, ps2, self._args.color)
         )
 
     def _initialize_formatter(self, token_map: "TokenMap") -> Callable:
@@ -472,36 +436,38 @@ class CliCommandsDemo(CliCommands):
         cli_hooks.on_init.append(prepare_readline)
         cli_hooks.execute(cli_hooks.on_init)
 
-        if self._args.is_set_operation():
-            calculator = SetCalculatorWrapper.create_from(self._args.set_op_id)
-            if self._args.interactive:
-                return RunnerSetOperationInteractiveDual(
-                    self._args.color,
-                    pipe,
-                    input_strategy,
-                    calculator,
-                    PromptDifferenceDetector,
-                    self._args.clipboard,
-                )
-            else:
-                return RunnerSetOperationDeclarativeMono.create_from_text(
-                    pipe,
-                    input_strategy,
-                    calculator,
-                    PromptDifferenceDetector,
-                    self._args.fixed_prompt,
-                    self._args.clipboard,
-                )
-        else:  # default
-            raise NotImplementedError
+        def create_from(key: str | None = "union") -> SetCalculator:
+            """Creates the instance from the key"""
+            if key == "inter":
+                return IntersectionCalculator()
+            elif key == "diff":
+                return DifferenceCalculator(reverse=self._args.reverse)
+            elif key == "symdiff":
+                return SymmetricDifferenceCalculator()
+
+            return UnionCalculator()
+
+        calculator = create_from(self._args.operation_id)
+        if self._args.interactive:
+            return RunnerSetOperationInteractiveDual(
+                self._args.color,
+                pipe,
+                input_strategy,
+                calculator,
+                PromptDifferenceDetector,
+                self._args.clipboard,
+            )
+        else:
+            return RunnerSetOperationDeclarativeMono.create_from_text(
+                pipe,
+                input_strategy,
+                calculator,
+                PromptDifferenceDetector,
+                self._args.fixed_prompt,
+                self._args.clipboard,
+            )
 
     def _get_pipeline(self) -> IPromptPipeline:
-        """This is a pipeline for the purpose of showcasing.
-        Since all the parameters of each command is variable, the command
-        sacrifices the composability.
-        It is good for you to create your own pipeline, and name it
-        so you can use it as a preset."""
-
         pipeline_cls = self._initialize_pipeline()
         return pipeline_cls
 
@@ -524,7 +490,7 @@ def app():
     try:
         runner = cli_commands.to_runner()
     except AttributeError as e:
-        logger.error(f"error: {e}")
+        logger.exception(f"error: {e}")
         exit(1)
 
     runner.run()
