@@ -16,12 +16,7 @@ from sanipro.token import Escaper
 from saniprocli import cli_hooks, inputs
 from saniprocli.abc import CliRunnable, InputStrategy
 from saniprocli.cli_runner import ExecuteSingle, RunnerDeclarative, RunnerInteractive
-from saniprocli.commands import (
-    CliArgsNamespaceDefault,
-    CliCommands,
-    SubparserInjectable,
-)
-from saniprocli.help_formatter import SaniproHelpFormatter
+from saniprocli.commands import CliArgsNamespaceDefault, CliCommands
 from saniprocli.sanipro_argparse import SaniproArgumentParser
 from saniprocli.textutils import CSVUtilsBase, dump_to_file, get_temp_filename
 
@@ -36,9 +31,6 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
 
     formatter: str
 
-    # 'dest' name for general operations
-    operation_id = str  # may be 'filter', 'set_op', and more
-
     # for tfind subcommand
     infile: typing.TextIO
     key_field: int
@@ -49,15 +41,11 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
     clipboard: bool
     config: str
 
-    def is_tfind(self) -> bool:
-        return self.operation_id == CliSubcommandSearchTag.command_id
-
     @classmethod
     def _do_append_parser(cls, parser: SaniproArgumentParser) -> None:
         parser.add_argument(
             "-d",
             "--input-delimiter",
-            type=str,
             default="\n",
             help=("Preferred delimiter for input."),
         )
@@ -66,44 +54,81 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
             "-D",
             "--output-delimiter",
             default="\n",
-            type=str,
-            help=("Preferred delimiter for output."),
+            help="Preferred delimiter for output.",
         )
 
         parser.add_argument(
             "-f",
             "--dict-field-separator",
             default=",",
-            type=str,
-            help=("Preferred field separator for dict file."),
+            help="Preferred field separator for dict file.",
         )
 
         parser.add_argument(
             "-F",
             "--output-field-separator",
             default=",",
-            type=str,
-            help=("Preferred output field separator for output."),
+            help="Preferred output field separator for output.",
         )
 
         parser.add_argument(
             "--formatter",
             default="csv",
             choices=Formatter.choices,
-            type=str,
-            help=("Preferred format for output."),
+            help="Preferred format for output.",
+        )
+
+        parser.add_argument(
+            "infile",
+            type=argparse.FileType("r"),
+            help="Specifies the text file comprised from two columns, each separated with delimiter.",
+        )
+
+        parser.add_argument(
+            "-i",
+            "--interactive",
+            action="store_true",
+            help="Provides the REPL interface to play with prompts. ",
+        )
+
+        parser.add_argument(
+            "-k",
+            "--key-field",
+            default=1,
+            type=int,
+            help="Select this field number's element as a key.",
+        )
+
+        parser.add_argument(
+            "-j",
+            "--value-field",
+            default=2,
+            type=int,
+            help="Select this field number's element as a value.",
+        )
+
+        parser.add_argument(
+            "-t",
+            "--tempdir",
+            default="/dev/shm",
+            help=(
+                "Use this directory as a tempfile storage. Technically speaking, "
+                "the program creates a new text file by extracting the field "
+                "from a csv file, format and save them so the GNU Readline "
+                "can read the histfile on this directory."
+            ),
+        )
+
+        parser.add_argument(
+            "-c",
+            "--clipboard",
+            action="store_true",
+            help="Copy the result to the clipboard if possible.",
         )
 
     @classmethod
     def _do_append_subparser(cls, parser: SaniproArgumentParser) -> None:
-        subparser = parser.add_subparsers(
-            title="operations", dest="operation_id", required=True
-        )
-
-        classes: list[type[SubparserInjectable]] = [CliSubcommandSearchTag]
-
-        for cmd in classes:
-            cmd.inject_subparser(subparser)
+        pass
 
 
 class CsvUtils(CSVUtilsBase):
@@ -349,102 +374,25 @@ class CliCommandsDemo(CliCommands):
 
         finder = TokenFinder(delimiter, formatter)
 
-        if self._args.is_tfind():
-            if self._args.interactive:
-                return RunnerTagFindInteractive.create_from_csv(
-                    finder,
-                    self._args.infile,
-                    input_strategy,
-                    self._args.dict_field_separator,
-                    self._args.key_field,
-                    self._args.value_field,
-                    self._args.tempdir,
-                    self._args.clipboard,
-                )
-
-            return RunnerTagFindNonInteractive.create_from_csv(
+        if self._args.interactive:
+            return RunnerTagFindInteractive.create_from_csv(
                 finder,
                 self._args.infile,
                 input_strategy,
                 self._args.dict_field_separator,
                 self._args.key_field,
                 self._args.value_field,
+                self._args.tempdir,
+                self._args.clipboard,
             )
-        else:  # default
-            raise NotImplementedError
 
-
-class CliSubcommandSearchTag(SubparserInjectable):
-    command_id: str = "tfind"
-
-    @classmethod
-    def inject_subparser(cls, subparser: argparse._SubParsersAction) -> None:
-        parser = subparser.add_parser(
-            name=cls.command_id,
-            formatter_class=SaniproHelpFormatter,
-            help=("Outputs the number of posts corresponds the tag specified."),
-            description=(
-                "In this mode a user specifies a CSV file acting as a key-value storage. "
-                "The first which is the `key` column corresponds to the name of the tag, "
-                "so do second which is the `value` column to the count of the assigned tag."
-            ),
-        )
-
-        parser.add_argument(
-            "infile",
-            type=argparse.FileType("r"),
-            help=(
-                "Specifies the text file comprised from two columns, "
-                "each separated with delimiter."
-            ),
-        )
-
-        parser.add_argument(
-            "-i",
-            "--interactive",
-            default=False,
-            action="store_true",
-            help=(
-                "Provides the REPL interface to play with prompts. "
-                "The program behaves like the Python interpreter."
-            ),
-        )
-
-        parser.add_argument(
-            "-k",
-            "--key-field",
-            default=1,
-            type=int,
-            help="Select this field number's element as a key.",
-        )
-
-        parser.add_argument(
-            "-v",
-            "--value-field",
-            default=2,
-            type=int,
-            help="Select this field number's element as a value.",
-        )
-
-        parser.add_argument(
-            "-t",
-            "--tempdir",
-            default="/dev/shm",
-            type=str,
-            help=(
-                "Use this directory as a tempfile storage. Technically speaking, "
-                "the program creates a new text file by extracting the field "
-                "from a csv file, format and save them so the GNU Readline "
-                "can read the histfile on this directory."
-            ),
-        )
-
-        parser.add_argument(
-            "-c",
-            "--clipboard",
-            default=False,
-            action="store_true",
-            help="Copy the result to the clipboard if possible.",
+        return RunnerTagFindNonInteractive.create_from_csv(
+            finder,
+            self._args.infile,
+            input_strategy,
+            self._args.dict_field_separator,
+            self._args.key_field,
+            self._args.value_field,
         )
 
 
@@ -458,7 +406,7 @@ def app():
     try:
         runner = cli_commands.to_runner()
     except AttributeError as e:
-        logger.error(f"error: {e}")
+        logger.exception(f"error: {e}")
         exit(1)
 
     runner.run()
