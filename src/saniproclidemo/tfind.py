@@ -22,7 +22,6 @@ from saniprocli.textutils import CSVUtilsBase, dump_to_file, get_temp_filename
 
 
 class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
-    # global options
     interactive: bool
 
     input_delimiter: str
@@ -31,7 +30,6 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
 
     formatter: str
 
-    # for tfind subcommand
     infile: typing.TextIO
     key_field: int
     value_field: int
@@ -40,6 +38,7 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
 
     clipboard: bool
     config: str
+    color: bool
 
     @classmethod
     def _do_append_parser(cls, parser: SaniproArgumentParser) -> None:
@@ -47,7 +46,15 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
             "-d",
             "--input-delimiter",
             default="\n",
-            help=("Preferred delimiter for input."),
+            help="Preferred delimiter for input.",
+        )
+
+        parser.add_argument(
+            "--no-color",
+            action="store_false",
+            default=True,
+            dest="color",
+            help="Without color for displaying.",
         )
 
         parser.add_argument(
@@ -88,7 +95,7 @@ class CliArgsNamespaceDemo(CliArgsNamespaceDefault):
             "-i",
             "--interactive",
             action="store_true",
-            help="Provides the REPL interface to play with prompts. ",
+            help="Provides the REPL interface to play with prompts.",
         )
 
         parser.add_argument(
@@ -343,9 +350,9 @@ class CliCommandsDemo(CliCommands):
         ps2 = self._args.ps2
 
         return (
-            inputs.OnelineInputStrategy(ps1)
+            inputs.OnelineInputStrategy(ps1, self._args.color)
             if self._args.one_line
-            else inputs.MultipleInputStrategy(ps1, ps2)
+            else inputs.MultipleInputStrategy(ps1, ps2, self._args.color)
         )
 
     def to_runner(self) -> CliRunnable:
