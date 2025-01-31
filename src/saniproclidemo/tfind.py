@@ -392,15 +392,15 @@ class CliCommandsDemo(CliCommands):
                 self._args.tempdir,
                 self._args.clipboard,
             )
-
-        return RunnerTagFindNonInteractive.create_from_csv(
-            finder,
-            self._args.infile,
-            input_strategy,
-            self._args.dict_field_separator,
-            self._args.key_field,
-            self._args.value_field,
-        )
+        else:
+            return RunnerTagFindNonInteractive.create_from_csv(
+                finder,
+                self._args.infile,
+                input_strategy,
+                self._args.dict_field_separator,
+                self._args.key_field,
+                self._args.value_field,
+            )
 
 
 def app():
